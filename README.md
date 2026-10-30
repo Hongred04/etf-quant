@@ -50,9 +50,10 @@ python scripts/make_report.py        # 5. 生成 HTML 研究报告
 python -m etfquant audit             # 6. 19 项审计自检
 ```
 
-**成品下载**（免安装）：[dist/etf-quant.exe](dist/etf-quant.exe)（Windows 便携控制台，双击即用，
-内置数据快照、只读展示）· [dist/etf-quant.apk](dist/etf-quant.apk)（Android 离线 App，
-引擎与桌面端逐日对拍验证，见 [mobile/README.md](mobile/README.md)）。
+**成品下载**（免安装）：到 [**Releases**](https://github.com/Hongred04/etf-quant/releases/latest) 下载——
+
+- **etf-quant.exe**（65 MB）：Windows 便携 Web 控制台，双击即用，内置数据快照、只读展示
+- **etf-quant.apk**（509 KB）：Android 离线 App，引擎与桌面端逐日对拍验证（见 [mobile/README.md](mobile/README.md)）
 
 ## 仓库导航
 
