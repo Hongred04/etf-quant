@@ -55,10 +55,23 @@ except ModuleNotFoundError as exc:  # noqa: PERF203
 from etfquant import holdings as H
 from etfquant import metrics as M
 
-ROOT = Path(__file__).resolve().parent
-WEB = ROOT / "web"
-OUT = ROOT / "output"
-DATA = ROOT / "data"
+if getattr(sys, "frozen", False):
+    # PyInstaller 打包版（dist/etf-quant.exe）：
+    # - 只读资源（web/ 前端）在解压临时目录（_MEIPASS）
+    # - 数据目录优先取 exe 旁边（把 exe 放进项目根目录 = 接管全套数据）；
+    #   exe 单独运行时回退到内置的 data/output 只读快照，保证开箱有东西可看。
+    ROOT = Path(sys.executable).resolve().parent
+    _MP = Path(getattr(sys, "_MEIPASS", ROOT))
+    WEB = _MP / "web"
+    OUT = (ROOT / "output") if (ROOT / "output").exists() else (_MP / "output")
+    DATA = (ROOT / "data") if (ROOT / "data").exists() else (_MP / "data")
+    FROZEN = True
+else:
+    ROOT = Path(__file__).resolve().parent
+    WEB = ROOT / "web"
+    OUT = ROOT / "output"
+    DATA = ROOT / "data"
+    FROZEN = False
 SCRIPTS = ROOT / "scripts"
 
 SELF = "S4-TGAR(自研)"
@@ -168,6 +181,17 @@ def start_task(action: str) -> str:
 
     def run_one(step_spec: dict, tag: str) -> int:
         """跑一个脚本，把输出逐行写进任务日志。返回退出码。"""
+        if FROZEN:
+            # exe 版没有内嵌 Python 解释器可供子进程调用，也不带 scripts/ 源码；
+            # 数据管道请用完整源码版（README「快速开始」）。
+            with TASK_LOCK:
+                TASKS[tid]["log"].append(
+                    f"{tag}[exe 版] 这是便携只读控制台，不含数据管道。"
+                    "刷新数据 / 回测请下载完整源码版后运行 python scripts/ 下对应脚本。")
+            TASKS[tid]["code"] = 2
+            TASKS[tid]["status"] = "error"
+            TASKS[tid]["duration"] = round(time.time() - TASKS[tid]["started"], 1)
+            return 2
         cmd = [sys.executable, str(SCRIPTS / step_spec["script"]), *step_spec["args"]]
         timed_out = threading.Event()
 
@@ -266,6 +290,27 @@ def _csv(fp: Path, **kw):
 
 def _downsample(n: int, target: int = MAX_POINTS) -> int:
     return max(1, n // target) if n > target else 1
+
+
+def api_debug_paths() -> dict:
+    """诊断端点：exe 排查"数据为什么没显示"用。只暴露路径与存在性，不含数据内容。"""
+    probe = {}
+    for name, fp in (("nav", OUT / "nav_main.csv"), ("perf", OUT / "perf_main.csv")):
+        try:
+            df = pd.read_csv(fp, index_col=0, parse_dates=True)
+            probe[name] = f"read OK, {len(df)} rows"
+        except FileNotFoundError:
+            probe[name] = "file missing"
+        except Exception as exc:  # noqa: BLE001
+            probe[name] = f"read FAILED: {type(exc).__name__}: {exc}"
+    return {
+        "frozen": FROZEN,
+        "root": str(ROOT),
+        "web": str(WEB),
+        "out": str(OUT),
+        "data": str(DATA),
+        "probe": probe,
+    }
 
 
 def api_overview() -> dict:
@@ -1549,6 +1594,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/overview":
                 return self._json(_cached("overview", 5, api_overview))
+            if path == "/api/_debug_paths":
+                return self._json(api_debug_paths())
             if path == "/api/signal":
                 return self._json(_cached("signal", 5, api_signal))
             if path == "/api/research":

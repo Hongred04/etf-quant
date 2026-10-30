@@ -13,10 +13,14 @@ data/cache_early/
 *.jks
 keystore.properties
 
-# ---- 构建产物 ----
-dist/
-android/build/
+# ---- 构建产物：成品 exe/apk 白名单入库（供下载），中间产物排除 ----
 *.apk
+android/build/
+build_exe/
+dist/*
+!dist/etf-quant.exe
+!dist/etf-quant.apk
+!dist/etf-quant.apk.idsig
 
 # ---- 临时预览 / 截图 ----
 output/preview/
