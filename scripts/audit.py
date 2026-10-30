@@ -354,7 +354,7 @@ def main() -> None:
        f"frozen_at={meta.get('frozen_at')}（重跑 deep 需 --force）" if meta.get("frozen_at")
        else "缺 frozen_at：跑一次 python -m etfquant deep 补齐")
 
-    readme_fp = ROOT / "README.md"
+    readme_fp = ROOT / "docs" / "README_full.md"
     if diag and readme_fp.exists():
         from etfquant.diagnostics import snapshot_rows  # noqa: PLC0415
 
@@ -364,11 +364,11 @@ def main() -> None:
         if m and rows:
             block = m.group(0)
             miss = [f"{k} = {v}" for k, v in rows if f"| {k} | {v} |" not in block]
-            ok("README 7.10 的生成表与诊断快照逐格一致", not miss,
+            ok("README_full 7.10 的生成表与诊断快照逐格一致", not miss,
                ("过期：" + "；".join(miss) + "（跑 sync-readme）") if miss
                else f"{len(rows)} 行全部对上（含冻结时间）")
         else:
-            ok("README 7.10 含生成的诊断表", False,
+            ok("README_full 7.10 含生成的诊断表", False,
                "缺 diag 标记，或 diagnostics.json 不完整")
 
     print("\n" + "=" * 78)

@@ -1,6 +1,7 @@
 # AGENTS.md — 给 AI Agent 的项目入口
 
-> 一页纸说明"这是什么、跑什么命令、哪些不能动"。人类读者请看 `README.md`；
+> 一页纸说明"这是什么、跑什么命令、哪些不能动"。人类读者：门面看 `README.md`，
+> 完整档案（全部实验记录）看 `docs/README_full.md`；
 > 结构细节看 `docs/architecture.md`；脚本索引看 `scripts/README.md`。
 
 ## 1. 这是什么

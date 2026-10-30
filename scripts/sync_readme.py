@@ -29,7 +29,10 @@ from etfquant import metrics  # noqa: E402
 from etfquant.expectation import load as load_expectation  # noqa: E402
 
 OUT = ROOT / "output"
-README = ROOT / "README.md"
+# 完整档案（全部表格与正文数字）搬到了 docs/README_full.md；根 README 只是精简门面，
+# 由本脚本末尾单独维护 exp 口径块。
+README = ROOT / "docs" / "README_full.md"
+README_HOME = ROOT / "README.md"
 
 NAME_MAP = {
     "S1-动量基线": "S1-动量基线（参考项目复刻）",
@@ -301,9 +304,31 @@ def main() -> None:
 
     if s != orig:
         README.write_text(s, encoding="utf-8")
-        print("[OK] README 已更新")
+        print("[OK] docs/README_full.md 已更新")
     else:
-        print("[--] README 无变化")
+        print("[--] docs/README_full.md 无变化")
+
+    # ---------- 根 README（仓库门面）的 exp 口径块 ----------
+    # 与档案同一数据源（expectation + perf/nav），保证四端口径不分叉。
+    if README_HOME.exists() and exp:
+        h = README_HOME.read_text(encoding="utf-8")
+        body = (
+            "<!-- exp:begin 由 scripts/sync_readme.py 生成，勿手改 -->\n"
+            "| 口径 | 值 |\n|---|---|\n"
+            f"| 回测年化（样本内上限） | {exp['sample']*100:.2f}% |\n"
+            f"| **对外预期** | **{exp['label']}** |\n"
+            f"| 锚点：滚动前向（纯样本外） | {exp['anchor']*100:.2f}% |\n"
+            f"| 最大回撤 / 夏普 | {tg['最大回撤']*100:.1f}% / {tg['夏普比率']:.2f} |\n"
+            f"| 基准：沪深300 全收益 | 年化 {b_cagr*100:.1f}%，回撤 {b_mdd*100:.1f}% |\n"
+            f"| 区间 / 标的池 | {self_nav.index[0].year}-{self_nav.index[-1].year}"
+            " / 全市场约 260 只 ETF |\n"
+            "<!-- exp:end -->")
+        h2 = re.sub(r"<!-- exp:begin.*?<!-- exp:end -->", body, h, count=1, flags=re.S)
+        if h2 != h:
+            README_HOME.write_text(h2, encoding="utf-8")
+            print("[OK] 根 README 口径块已更新")
+        else:
+            print("[--] 根 README 口径块无变化")
 
     print(f"     TGAR  CAGR {tg['年化收益(CAGR)']*100:.2f}%  回撤 {tg['最大回撤']*100:.2f}%  "
           f"夏普 {tg['夏普比率']:.3f}  卡玛 {tg['卡玛比率']:.3f}")
