@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    ETF Quant · Android 壳
+    - 网络权限只用于两件事：腾讯行情快照/日线、局域网拉取 PC 数据（可选）
+    - 单 Activity + WebView，页面本身是 mobile/app/assets/www 下的纯静态 SPA
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.etfquant.mobile"
+    android:versionCode="16"
+    android:versionName="1.5.0">
+
+    <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34" />
+
+    <!-- 仅用于两件事：① 向 PC 上的控制台拉取最新数据（局域网 http）② 腾讯行情快照刷新实时价 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- 调仓日提醒：只在用户开启提醒后使用，Android 13+ 运行时申请 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:theme="@style/AppTheme"
+        android:allowBackup="true"
+        android:hardwareAccelerated="true"
+        android:supportsRtl="true"
+        android:usesCleartextTraffic="true">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|screenSize|keyboardHidden|uiMode|smallestScreenSize"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

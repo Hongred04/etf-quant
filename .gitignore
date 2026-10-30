@@ -1,0 +1,29 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# ---- 行情缓存（可用 scripts/download_history.py 重建）----
+data/cache/
+data/cache_early/
+
+# ---- Android 签名密钥：严禁上传（泄露=任何人可冒名发布 APK）----
+*.keystore
+*.jks
+keystore.properties
+
+# ---- 构建产物 ----
+dist/
+android/build/
+*.apk
+
+# ---- 临时预览 / 截图 ----
+output/preview/
+mobile/shots/
+
+# ---- 编辑器 / 系统 ----
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp

@@ -1,0 +1,41 @@
+{
+  "n_variants": 29,
+  "n_days": 1894,
+  "pbo": 0.432,
+  "is_sharpe_median": 0.8975,
+  "oos_sharpe_median": 0.6677,
+  "best_variant": "minamt1e7",
+  "best_cagr": 0.2019,
+  "best_sharpe": 0.7807,
+  "default_rank": 5,
+  "dsr_best": 0.948,
+  "dsr_default": 0.9188,
+  "wf_cagr": 0.1262,
+  "wf_fixed_cagr": 0.1541,
+  "wf_windows": 11,
+  "wf_picked": [
+    "rmid0.6",
+    "freq10",
+    "freq10",
+    "freq10",
+    "freq10",
+    "top2",
+    "score_multi",
+    "score_multi",
+    "buffer1",
+    "score_multi",
+    "vr2"
+  ],
+  "expectation": {
+    "band": [
+      0.11,
+      0.13
+    ],
+    "label": "11%~13%",
+    "anchor": 0.1262,
+    "sample": 0.1745,
+    "discount": 0.277,
+    "pbo": 0.432,
+    "n_variants": 29
+  }
+}

@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0e14">
+<meta name="color-scheme" content="dark light">
+<title>ETF Quant</title>
+<link rel="stylesheet" href="css/app.css">
+<script>
+  /* 主题要在首帧前定好，否则会闪一下白 */
+  (function () {
+    var q = new URLSearchParams(location.search).get("theme");
+    var t = q || localStorage.getItem("etfq-theme");
+    if (!t) t = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    document.documentElement.dataset.theme = t;
+  })();
+</script>
+</head>
+<body>
+
+<header class="appbar" id="appbar">
+  <div class="appbar__main">
+    <div class="appbar__brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M4 17l5-6 4 3 7-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+      <span class="brand-text">ETF Quant</span>
+    </div>
+    <h1 class="appbar__title" id="pageTitle">概览</h1>
+  </div>
+  <!-- 行情更新进度环：唯一的过程反馈，不弹任何文字提示 -->
+  <div class="prog" id="prog" hidden aria-hidden="true">
+    <svg class="prog__ring" viewBox="0 0 44 44">
+      <circle class="prog__bg" cx="22" cy="22" r="18.5"/>
+      <circle class="prog__fg" cx="22" cy="22" r="18.5"/>
+    </svg>
+    <svg class="prog__mark prog__mark--ok" viewBox="0 0 24 24" fill="none">
+      <path d="M6.4 12.5l3.7 3.7 7.5-7.9" stroke="currentColor" stroke-width="2.4"
+            stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <svg class="prog__mark prog__mark--err" viewBox="0 0 24 24" fill="none">
+      <path d="M8.5 8.5l7 7M15.5 8.5l-7 7" stroke="currentColor" stroke-width="2.4"
+            stroke-linecap="round"/>
+    </svg>
+  </div>
+  <button class="iconbtn" id="btnTheme" aria-label="切换主题">
+    <svg class="ico-sun" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="4.2" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+    <svg class="ico-moon" viewBox="0 0 24 24" fill="none"><path d="M20.5 14.3A8.5 8.5 0 019.7 3.5a8.5 8.5 0 1010.8 10.8z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+  </button>
+</header>
+
+<main class="view" id="view"></main>
+
+<nav class="tabbar" id="tabbar" aria-label="主导航">
+  <button class="tab is-active" data-tab="overview">
+    <svg viewBox="0 0 24 24" fill="none"><path d="M4 19V9m5 10V5m5 14v-7m5 7V8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+    <span>概览</span>
+  </button>
+  <button class="tab" data-tab="today">
+    <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="16" height="16" rx="3.5" stroke="currentColor" stroke-width="2"/><path d="M8.2 12.2l2.6 2.6 5-5.4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span>今日</span>
+  </button>
+  <button class="tab" data-tab="holdings">
+    <svg viewBox="0 0 24 24" fill="none"><path d="M12 3.5a8.5 8.5 0 108.5 8.5H12V3.5z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M14.6 3.9A8.5 8.5 0 0120.1 9.4h-5.5V3.9z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+    <span>持仓</span>
+  </button>
+  <button class="tab" data-tab="research">
+    <svg viewBox="0 0 24 24" fill="none"><path d="M9 3.5h6M10 3.5v5.2L5.4 17a2.6 2.6 0 002.2 3.9h8.8a2.6 2.6 0 002.2-3.9L14 8.7V3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M7.6 14.5h8.8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    <span>验证</span>
+  </button>
+  <button class="tab" data-tab="more">
+    <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="2.1" fill="currentColor"/><circle cx="5.5" cy="12" r="1.8" fill="currentColor"/><circle cx="18.5" cy="12" r="1.8" fill="currentColor"/></svg>
+    <span>更多</span>
+  </button>
+</nav>
+
+<div class="sheet-backdrop" id="sheetBackdrop" hidden></div>
+<section class="sheet" id="sheet" hidden aria-modal="true" role="dialog">
+  <div class="sheet__grab" aria-hidden="true"></div>
+  <h2 class="sheet__title" id="sheetTitle"></h2>
+  <div class="sheet__body" id="sheetBody"></div>
+  <button class="btn btn--block" id="sheetClose">知道了</button>
+</section>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="data.js"></script>
+<script src="js/engine.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

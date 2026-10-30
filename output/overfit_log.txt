@@ -1,0 +1,92 @@
+[1/4] 加载面板…
+      260 只 · 2018-01-02 ~ 2026-10-28
+[2/4] 跑 29 个变体（每个约 7 秒）…
+      [ 1/29] 默认                 CAGR 17.45% Sharpe 0.696  (10s)
+      [ 2/29] freq3              CAGR 12.35% Sharpe 0.538  (23s)
+      [ 3/29] freq10             CAGR 14.18% Sharpe 0.597  (31s)
+      [ 4/29] freq20             CAGR  9.57% Sharpe 0.430  (38s)
+      [ 5/29] top2               CAGR 14.47% Sharpe 0.600  (48s)
+      [ 6/29] top4               CAGR 14.62% Sharpe 0.616  (57s)
+      [ 7/29] top5               CAGR 13.11% Sharpe 0.574  (66s)
+      [ 8/29] cap0.35            CAGR 17.45% Sharpe 0.696  (76s)
+      [ 9/29] cap0.60            CAGR 17.45% Sharpe 0.696  (85s)
+      [10/29] cap1.00            CAGR 17.45% Sharpe 0.696  (95s)
+      [11/29] buffer1            CAGR 14.69% Sharpe 0.598  (104s)
+      [12/29] buffer3            CAGR 16.59% Sharpe 0.674  (112s)
+      [13/29] vr2                CAGR 14.34% Sharpe 0.604  (120s)
+      [14/29] vr5                CAGR 16.19% Sharpe 0.647  (128s)
+      [15/29] rmid0.6            CAGR 17.47% Sharpe 0.686  (136s)
+      [16/29] rmid0.8            CAGR 18.28% Sharpe 0.769  (145s)
+      [17/29] gate_empty         CAGR 14.90% Sharpe 0.628  (153s)
+      [18/29] expo_mid0.7        CAGR 18.58% Sharpe 0.707  (161s)
+      [19/29] score_multi        CAGR 14.73% Sharpe 0.617  (170s)
+      [20/29] weight_invvol      CAGR 18.62% Sharpe 0.742  (180s)
+      [21/29] minamt5e7          CAGR 16.12% Sharpe 0.652  (188s)
+      [22/29] minamt1e7          CAGR 20.19% Sharpe 0.781  (195s)
+      [23/29] minhist120         CAGR 16.46% Sharpe 0.655  (202s)
+      [24/29] minhist500         CAGR  9.40% Sharpe 0.442  (209s)
+      [25/29] freq3+top2         CAGR  8.87% Sharpe 0.413  (218s)
+      [26/29] freq10+top4        CAGR 12.19% Sharpe 0.541  (224s)
+      [27/29] freq5+buffer1      CAGR 14.69% Sharpe 0.598  (231s)
+      [28/29] cap0.35+top4       CAGR 14.62% Sharpe 0.616  (237s)
+      [29/29] top2+cap0.6        CAGR 15.79% Sharpe 0.613  (247s)
+      [参照] 纯动量 CAGR 18.19% Sharpe 0.641 MDD -35.89%
+
+[3/4] 检验：29 个变体 × 1894 个交易日
+
+==============================================================================
+① 挑冠军是不是在挑噪声（CSCV / PBO）
+==============================================================================
+  分块 16 块 · 组合数 12870
+  PBO = 43.2%   （样本内冠军在样本外掉到中位数以下的概率）
+  样本内冠军的样本外 Sharpe：中位 0.668 · 均值 0.655 · P10 0.260
+  样本内 Sharpe 中位 0.897 → 样本外 0.668（衰减 0.230）
+
+==============================================================================
+② 试了这么多次之后，Sharpe 还剩多少显著性（Deflated Sharpe）
+==============================================================================
+  网格内最优：minamt1e7 · 年化 Sharpe 0.781 · CAGR 20.19%
+  只算本网格                  N=29  临界 Sharpe 0.19 · 实际 0.78 · DSR = 94.8%
+  计入历史全部试验（约 60）         N=60  临界 Sharpe 0.21 · 实际 0.78 · DSR = 94.0%
+  默认参数（未被挑选）      N=29  DSR = 91.9%
+
+==============================================================================
+③ 每 6 个月重挑一次参数，实盘会怎样（滚动前向）
+==============================================================================
+Traceback (most recent call last):
+  File "C:\Users\macro\Desktop\etf-quant\scripts\overfit_check.py", line 308, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "C:\Users\macro\Desktop\etf-quant\scripts\overfit_check.py", line 212, in main
+    wf.to_csv(ROOT / "output" / "overfit_walk.csv", encoding="utf-8-sig", index=False)
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\macro\Desktop\etf-quant\.venv\Lib\site-packages\pandas\core\generic.py", line 4026, in to_csv
+    return DataFrameRenderer(formatter).to_csv(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        path_or_buf,
+        ^^^^^^^^^^^^
+    ...<14 lines>...
+        storage_options=storage_options,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\macro\Desktop\etf-quant\.venv\Lib\site-packages\pandas\io\formats\format.py", line 1027, in to_csv
+    csv_formatter.save()
+    ~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\macro\Desktop\etf-quant\.venv\Lib\site-packages\pandas\io\formats\csvs.py", line 251, in save
+    with get_handle(
+         ~~~~~~~~~~^
+        self.filepath_or_buffer,
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+        storage_options=self.storage_options,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ) as handles:
+    ^
+  File "C:\Users\macro\Desktop\etf-quant\.venv\Lib\site-packages\pandas\io\common.py", line 939, in get_handle
+    handle = open(
+        handle,
+    ...<3 lines>...
+        newline="",
+    )
+PermissionError: [Errno 13] Permission denied: 'C:\\Users\\macro\\Desktop\\etf-quant\\output\\overfit_walk.csv'
