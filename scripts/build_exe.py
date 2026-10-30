@@ -17,6 +17,7 @@ exe 是**便携只读控制台**：双击即用，无需安装 Python。
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -25,6 +26,20 @@ ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "build_exe"
 DIST = ROOT / "dist"
 EXE = DIST / "etf-quant.exe"
+
+# 隐私文件：不进 exe（exe 可能被分发，持仓只留在本机 data/）
+EXCLUDE_FROM_DATA = {"my_holdings.json"}
+
+
+def stage_data() -> Path:
+    """把 data/ 复制到打包暂存目录，剔除隐私文件。"""
+    stage = BUILD / "data_stage"
+    if stage.exists():
+        shutil.rmtree(stage)
+    shutil.copytree(ROOT / "data", stage,
+                    ignore=shutil.ignore_patterns("cache", "cache_early",
+                                                  *EXCLUDE_FROM_DATA))
+    return stage
 
 
 def sh(cmd: list[str]) -> None:
@@ -47,6 +62,7 @@ def main() -> int:
     if BUILD.exists():
         sh(["cmd", "/c", f"rmdir /s /q {BUILD}"])
     BUILD.mkdir(parents=True)
+    data_stage = stage_data()
 
     sh([
         sys.executable, "-m", "PyInstaller",
@@ -54,7 +70,7 @@ def main() -> int:
         "--name", "etf-quant",
         "--console",                      # 保留控制台：用户能看到地址、Ctrl+C 可停
         "--add-data", f"{ROOT / 'web'};web",
-        "--add-data", f"{ROOT / 'data'};data",   # 只读快照：首次运行即有数据可展示
+        "--add-data", f"{data_stage};data",   # 只读快照（已剔除持仓等隐私文件）
         "--add-data", f"{ROOT / 'output'};output",
         # pandas 读 CSV（parse_dates）需要这些可选依赖；PyInstaller 静态分析常漏，
         # 漏了会在运行时 ImportError 且被 _csv() 吞掉，表现为"缺少回测产物"。
