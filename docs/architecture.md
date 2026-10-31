@@ -31,6 +31,49 @@
 **规则**：箭头只能向下调用。核心层不许 import `server.py`；研究层不许被核心层 import；
 脚本负责"读文件 → 调库 → 写文件"，不把业务逻辑写在脚本里（这样测试才能覆盖）。
 
+> 这条规则**不是君子协定**：`python -m etfquant audit` 的 L 节会用 AST 扫描实际 import，
+> 违反即 FAIL；新增模块如果没在下表登记，同样 FAIL。改结构时先改表，再改代码。
+
+## 1.5 模块地图
+
+三层归属决定"改这里会不会影响日常刷新/回测"：
+
+| 层 | 含义 | 含义之外的代价 |
+|---|---|---|
+| **生产** | server 与日常脚本会调用，改动直接影响界面和刷新 | 改错会让界面/信号当天不可用 |
+| **研究** | 只有 `scripts/research/` 调用，结论已写进 README 第七章 | 可以放心重写，不影响日常 |
+| **工具** | 验证与报告（体检/月报/诊断），按需运行 | 改动只影响对应的检查产出 |
+
+| 模块 | 层 | 职责 | 调用方 |
+|---|---|---|---|
+| `datafeed` | 生产 | 行情抓取（腾讯双主机轮换 + 当日覆盖度门 + 原子缓存） | pipeline、scripts |
+| `universe` | 生产 | 标的池：全市场扫描、分类、流动性过滤 | pipeline、scripts |
+| `pipeline` | 生产 | 面板组装（缓存 → Panel），刷新链的入口 | scripts、server |
+| `factors` | 生产 | 因子计算：动量、波动、趋势、拥挤度、广度 | strategy |
+| `strategy` | 生产 | 四策略：S1 动量基线 / S2 双动量 / S3 多因子 / S4 TGAR | pipeline、backtest |
+| `backtest` | 生产 | 事件驱动回测：成本、换手、逐日净值 | scripts、track |
+| `metrics` | 生产 | 绩效指标（CAGR 用日历天数，波动/夏普按 252） | 全部报告类 |
+| `report` | 生产 | HTML 研究报告生成（内联 SVG） | scripts |
+| `holdings` | 生产 | 实盘持仓：校验、整手建仓、浮动盈亏 | server |
+| `track` | 生产 | 实盘跟踪：信号归档 → 纸上净值 | server、scripts |
+| `expectation` | 生产 | 对外口径换算（样本内 → 11%~13%） | server、scripts、report |
+| `secondary` | 生产 | 第二排序键（默认关闭，负结果留档） | strategy |
+| `rebalance` | 生产 | 调仓日历（解释清单为何不每天变） | server |
+| `io_utils` | 生产 | 原子写（CSV/文本） | 全部落盘处 |
+| `cli` | 生产 | 命令行入口（`python -m etfquant <cmd>`） | 人 |
+| `__main__` | 生产 | `python -m etfquant` 的引导（转 cli） | 人 |
+| `diagnostics` | 工具 | 深度诊断：归因、执行缺口、容量、bootstrap、IC | deep_check、audit |
+| `overfit` | 工具 | 过拟合体检：PBO / CSCV / 滚动前向 | overfit_check、dsr |
+| `monthly` | 工具 | 前向验证月报（对着预注册停止条件打分） | monthly_report |
+| `placebo` | 研究 | 随机对照：同候选集/敞口/费率的安慰剂策略 | research |
+| `chan` | 研究 | 缠论笔交易（含未来函数自查，负结果） | research |
+| `dual_mom` | 研究 | 双动量（绝对 + 相对） | research |
+| `resid_mom` | 研究 | 残差动量（负结果） | research |
+| `macross` | 研究 | 均线金叉死叉波段（负结果） | research |
+| `meta` | 研究 | 元标签：模型决定仓位（负结果） | research |
+| `shares` | 研究 | ETF 份额（申赎）采集 | research |
+| `alpha_track` | 研究 | alpha 随时间衰减的跟踪 | research |
+
 ## 2. 数据流（一次更新的完整路径）
 
 ```

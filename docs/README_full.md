@@ -245,7 +245,7 @@ python -m etfquant report
 | 绩效层 | CAGR / 波动 / Sharpe / Sortino / MaxDD / Calmar / 胜率 / Alpha / Beta / 信息比率 / 年度月度分解 / 换手与成本 |
 | 信号层 | 按最新交易日输出目标权重、市场状态、对应因子值，导出 CSV |
 | 持仓层 | **实盘持仓录入**（份额/成本价/买入日）、实时估值与浮动盈亏、与今日信号的仓位偏离对比（加/减/清仓 + 手数） |
-| 验证层 | 266 项单元测试（含 2 项无前视偏差检验、持仓估值与建议边界、数据新鲜度口径）、模块消融、增量归因、子样本稳定性 |
+| 验证层 | 268 项单元测试（含 2 项无前视偏差检验、持仓估值与建议边界、数据新鲜度口径）、模块消融、增量归因、子样本稳定性 |
 
 ---
 
@@ -1654,7 +1654,7 @@ etf-quant/
 │   ├── download_history.py / run_backtest.py / run_signal.py / make_report.py
 │   ├── ablation.py / grid2.py        界面「效果验证」页的数据源
 │   └── research/       一次性实验（11 个），产物进 output/experiments/
-├── tests/              266 项单元测试
+├── tests/              268 项单元测试
 ├── output/             产物（顶层=应用依赖，experiments/=可删）
 └── data/               行情缓存、标的池、信号归档
 ```

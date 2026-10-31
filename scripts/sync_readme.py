@@ -90,8 +90,11 @@ def _sync_test_counts() -> int | None:
         print("[WARN] 数不出测试数量，跳过单测数同步")
         return None
     targets = (
-        (ROOT / "README.md", [(r"\| 验证层 \| \d+ 项单元测试", f"| 验证层 | {n} 项单元测试"),
-                              (r"├── tests/ +\d+ 项单元测试", f"├── tests/              {n} 项单元测试")]),
+        # 这两行随 README 拆分搬进了完整档案（docs/README_full.md）。
+        # 拆完后忘了改这里 → 同步静默失效（re.sub 不匹配就不改，只报"无变化"）。
+        (ROOT / "docs" / "README_full.md",
+         [(r"\| 验证层 \| \d+ 项单元测试", f"| 验证层 | {n} 项单元测试"),
+          (r"├── tests/ +\d+ 项单元测试", f"├── tests/              {n} 项单元测试")]),
         (ROOT / "AGENTS.md", [(r"# \d+ 项单测", f"# {n} 项单测"),
                               (r"\| \d+ 项单测 \|", f"| {n} 项单测 |")]),
         (ROOT / "scripts" / "README.md", [(r"单元测试（\d+ 项）", f"单元测试（{n} 项）")]),

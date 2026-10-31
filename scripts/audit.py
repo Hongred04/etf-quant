@@ -51,11 +51,25 @@ def _latest_date() -> str:
 PANEL_START, START = "2018-01-02", "2019-01-02"
 END = _latest_date()
 FAIL: list[str] = []
+N_PASS = 0
 
 
-def ok(name: str, passed: bool, detail: str = "") -> None:
-    print(f"  [{'PASS' if passed else 'FAIL'}] {name}{(' — ' + detail) if detail else ''}")
-    if not passed:
+def ok(name: str, passed: bool, detail: str = "", info: str = "") -> None:
+    """打一行检查结果。
+
+    detail 是**失败时**才有意义的信息（原因 / 修复指引），info 是**通过时**的证据
+    （total=68 sum=68、4 行全部对上……）。两者分开，避免出现
+    「[PASS] … — 缺失」这种自相矛盾的输出——那会让人以为检查没生效。
+    """
+    global N_PASS
+    line = f"  [{'PASS' if passed else 'FAIL'}] {name}"
+    plus = info if passed else detail
+    if plus:
+        line += f" — {plus}"
+    print(line)
+    if passed:
+        N_PASS += 1
+    else:
         FAIL.append(name)
 
 
@@ -169,7 +183,8 @@ def main() -> None:
         if any(abs(a.get(k, 0) - b.get(k, 0)) > 1e-9 for k in keys):
             mism += 1
     print(f"  篡改 {cutoff.date()} 之后的全部价格，比较此前的 {len(common)} 个调仓日")
-    ok("历史信号不随未来数据变化", mism == 0, f"不一致 {mism} 个")
+    ok("历史信号不随未来数据变化", mism == 0, f"不一致 {mism} 个",
+       "用未来数据重算历史信号，逐日比对全一致")
 
     print("\n" + "=" * 78)
     print("E. 统计口径")
@@ -206,7 +221,8 @@ def main() -> None:
         if len(stale):
             names = panel.meta.loc[stale.index, "name"].head(6).tolist()
             print(f"    样例：{names}")
-        ok("全池行情均已更新到信号日", len(stale) == 0, f"{len(stale)} 只滞后")
+        ok("全池行情均已更新到信号日", len(stale) == 0, f"{len(stale)} 只滞后",
+           "全部标的行情与信号日对齐")
     else:
         ok("面板提供 last_date", False, "Panel.last_date 缺失")
 
@@ -351,8 +367,8 @@ def main() -> None:
     meta = diag.get("meta") or {}
     ok("诊断快照带冻结时间（月报的 β 基准可追溯）",
        bool(meta.get("frozen_at")),
-       f"frozen_at={meta.get('frozen_at')}（重跑 deep 需 --force）" if meta.get("frozen_at")
-       else "缺 frozen_at：跑一次 python -m etfquant deep 补齐")
+       "缺 frozen_at：跑一次 python -m etfquant deep 补齐",
+       f"frozen_at={meta.get('frozen_at')}（重跑 deep 需 --force）")
 
     readme_fp = ROOT / "docs" / "README_full.md"
     if diag and readme_fp.exists():
@@ -365,8 +381,8 @@ def main() -> None:
             block = m.group(0)
             miss = [f"{k} = {v}" for k, v in rows if f"| {k} | {v} |" not in block]
             ok("README_full 7.10 的生成表与诊断快照逐格一致", not miss,
-               ("过期：" + "；".join(miss) + "（跑 sync-readme）") if miss
-               else f"{len(rows)} 行全部对上（含冻结时间）")
+               "过期：" + "；".join(miss) + "（跑 sync-readme）",
+               f"{len(rows)} 行全部对上（含冻结时间）")
         else:
             ok("README_full 7.10 含生成的诊断表", False,
                "缺 diag 标记，或 diagnostics.json 不完整")
@@ -385,7 +401,9 @@ def main() -> None:
             reg = _json.loads(trials_fp.read_text(encoding="utf-8"))
             total = int(reg.get("total", -1))
             ssum = sum(int(t["n"]) for t in reg.get("trials", []))
-            ok("试验登记簿 total 与各条之和一致", total == ssum, f"total={total} sum={ssum}")
+            ok("试验登记簿 total 与各条之和一致", total == ssum,
+               f"total={total} 与各条之和不符 sum={ssum}",
+               f"total={total} = 各条之和")
             ok("试验登记簿含参数网格", int(reg.get("grid_variants", 0)) > 0, "grid_variants 缺失")
         except (OSError, ValueError) as exc:
             ok("试验登记簿可解析", False, str(exc)[:60])
@@ -413,14 +431,81 @@ def main() -> None:
             ok("复现清单可复核", False, str(exc)[:60])
 
     print("\n" + "=" * 78)
+    # ------------------------------------------------------------------ L
+    print("\n" + "=" * 78)
+    print("L. 架构分层契约（依赖方向 / 模块地图）")
+    print("=" * 78)
+
+    import ast as _ast
+
+    # 分层归属必须与 docs/architecture.md §1.5 的模块地图一致。
+    # 意义：生产层被 server / 日常脚本调用，反向依赖研究层会让"刷新一次"拖上实验代码；
+    # 研究层只有在 research/ 下才该出现。
+    PROD = {
+        "datafeed", "universe", "pipeline", "factors", "strategy", "backtest",
+        "metrics", "report", "holdings", "track", "expectation", "secondary",
+        "rebalance", "io_utils", "cli", "__main__",
+    }
+    RESEARCH = {"placebo", "chan", "dual_mom", "resid_mom", "macross", "meta",
+                "shares", "alpha_track"}
+    TOOLS = {"diagnostics", "overfit", "monthly"}
+    # 有意保留的例外（写进 strategy 的 docstring，不是漏网）：
+    ALLOWED = {("strategy", "secondary")}
+
+    pkg = ROOT / "etfquant"
+    mods = {p.stem: p for p in pkg.glob("*.py") if p.stem != "__init__"}
+    bad_edge, bad_server, unknown = [], [], []
+    for name, fp in sorted(mods.items()):
+        if name not in PROD | RESEARCH | TOOLS:
+            unknown.append(name)
+            continue
+        tree = _ast.parse(fp.read_text(encoding="utf-8"))
+        deps: set[str] = set()
+        for node in _ast.walk(tree):
+            if isinstance(node, _ast.ImportFrom):
+                if node.level and node.module:
+                    deps.add(node.module.split(".")[0])
+                elif node.level:
+                    deps |= {a.name.split(".")[0] for a in node.names}
+            elif isinstance(node, _ast.Import):
+                for a in node.names:
+                    if a.name.split(".")[0] == "server":
+                        bad_server.append(f"{name}→server")
+        deps &= set(mods)
+        if name in PROD:
+            for d in deps & RESEARCH:
+                if (name, d) not in ALLOWED:
+                    bad_edge.append(f"{name}→{d}")
+        if "server" in deps:
+            bad_server.append(f"{name}→server")
+
+    ok("生产层不反向依赖研究层", not bad_edge,
+       "；".join(bad_edge) + "（研究代码混进生产链路：刷新/回测会拖上实验依赖）",
+       f"{len(PROD)} 个生产模块零反向依赖")
+    ok("etfquant 不反向依赖 server（依赖方向单向）", not bad_server,
+       "；".join(sorted(set(bad_server))), "依赖方向自上而下")
+    ok("每个模块都有明确分层", not unknown,
+       f"未登记：{', '.join(unknown)}（在 docs/architecture.md §1.5 补一行，再加进本检查）",
+       f"{len(mods)} 个模块已分层")
+    arch_fp = ROOT / "docs" / "architecture.md"
+    if arch_fp.exists():
+        arch_txt = arch_fp.read_text(encoding="utf-8")
+        missing = [m for m in sorted(mods) if not _re.search(rf"`{m}`", arch_txt)]
+        ok("架构文档的模块地图覆盖全部模块", not missing,
+           f"缺：{', '.join(missing)}（新增模块要在地图里登记，否则只有作者知道它干什么）",
+           f"{len(mods)}/{len(mods)} 全部在地图里")
+    else:
+        ok("架构文档存在", False, "缺 docs/architecture.md")
+
+    print("\n" + "=" * 78)
     print("结论")
     print("=" * 78)
     if FAIL:
-        print("  发现问题：")
+        print(f"  发现问题（通过 {N_PASS} 项 / 失败 {len(FAIL)} 项）：")
         for f in FAIL:
             print(f"    · {f}")
     else:
-        print("  全部检查通过")
+        print(f"  全部检查通过（{N_PASS} 项）")
     print(f"\n  当前 TGAR：CAGR {metrics.cagr(nav):.2%} | MaxDD {metrics.max_drawdown(nav):.2%} "
           f"| Sharpe(CAGR法) {old_sharpe:.3f} | Sharpe(标准) {new_sharpe:.3f}")
 

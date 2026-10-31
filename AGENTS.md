@@ -15,7 +15,7 @@ A 股 ETF 的量化轮动工具：260 只 ETF 的横截面动量选股（TGAR �
 ```bash
 .venv/Scripts/python.exe -m etfquant doctor     # 数据截止日 + 绩效 + 口径（先看这个）
 .venv/Scripts/python.exe -m etfquant refresh    # 更新行情 → 回测 → 信号（= 界面按钮）
-.venv/Scripts/python.exe -m etfquant test       # 266 项单测
+.venv/Scripts/python.exe -m etfquant test       # 268 项单测
 ```
 
 Windows 上双击 `打开界面.bat` 启动 Web 控制台（`http://127.0.0.1:8800/`）。
@@ -32,7 +32,7 @@ Windows 上双击 `打开界面.bat` 启动 Web 控制台（`http://127.0.0.1:88
 | `scripts/research/` | 一次性实验（11 个），产物进 `output/experiments/` | 只在做对照实验时 |
 | `output/` | **产物契约**见 `output/README.md`：顶层是 app 依赖，`experiments/` 可随时删 | 服务/报告 |
 | `data/` | 行情缓存（`cache/kline_qfq/*.csv`）、标的池、归档信号 | 全部 |
-| `tests/` | 266 项单测 | CI 式自检 |
+| `tests/` | 268 项单测 | CI 式自检 |
 | `docs/` | 架构、外部策略尽调清单、代码评审 | 人 + Agent |
 
 ## 4. 硬约束（改代码前必读）
@@ -50,6 +50,9 @@ Windows 上双击 `打开界面.bat` 启动 Web 控制台（`http://127.0.0.1:88
    改了 `strategy.py` 还要跑 `python -m etfquant verify-engine`（手机端逐点对拍）。
 6. **不要在这个仓库里调参**：7.5 的过拟合体检（PBO 43.2%）已判定样本内搜索的期望收益
    低于风险，下一步只能靠前向跟踪（`data/signal_archive.csv` + 月报）。
+7. **依赖方向单向**：生产模块不得 import 研究模块（`chan/macross/meta/...`），
+   `etfquant` 不得 import `server`。新增模块要同时登记到 `docs/architecture.md` §1.5 的
+   模块地图，否则 `audit` 的 L 节直接 FAIL。这条规则是可执行的，不是文档约定。
 
 ## 5. 数据与外部依赖
 
