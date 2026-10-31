@@ -1518,22 +1518,55 @@
       var amount = parseFloat($("#fAmount").value);
       if (!(amount > 0)) { return; }
       if (!window.confirm("确认用 ¥" + Math.round(amount).toLocaleString("en-US") + " 建仓？会覆盖现有持仓。")) return;
-      var items = [], spent = 0;
+      var items = [], spent = 0, notes = [];
       sigRows.forEach(function (r) {
         var w = +r.weight, px = +r.price;
         if (!(w > 0) || !(px > 0)) return;
-        var lots = Math.floor((amount * w) / (px * 100));
-        if (lots <= 0) return;
+        var budget = amount * w, lotCost = px * 100;
+        var lots = Math.floor(budget / lotCost);
+        if (lots <= 0) {
+          notes.push({
+            kind: "lot_too_big", name: r.name, code: r.code,
+            msg: "一手需 ¥" + Math.round(lotCost).toLocaleString("en-US") +
+                 "，超过该只预算 ¥" + Math.round(budget).toLocaleString("en-US") +
+                 "，整只未买入（目标 " + (w * 100).toFixed(1) + "%）"
+          });
+          return;
+        }
         var sh = lots * 100;
         spent += sh * px;
         items.push({ code: r.code, name: r.name, shares: sh, cost: px, buy_date: localDate(), note: "按信号建仓" });
+        var actualW = (sh * px) / amount;
+        if (w - actualW > 0.01) {
+          notes.push({
+            kind: "underweight", name: r.name, code: r.code,
+            msg: "取整后实际权重 " + (actualW * 100).toFixed(1) + "%，低于目标 " +
+                 (w * 100).toFixed(1) + "%（少配 " + ((w - actualW) * 100).toFixed(1) + "pp）"
+          });
+        }
       });
-      if (!items.length) { toast("这个金额买不到一手"); return; }
+      if (!items.length) {
+        toast("这个金额买不到一手" + (notes.length ? "：" + notes[0].msg : ""));
+        return;
+      }
       saveHold({ cash: Math.max(0, amount - spent), items: items });
       closeSheet();
       holdTab = "mine";
       render();
-      toast("已建仓 " + items.length + " 只");
+      if (notes.length) {
+        var miss = notes.filter(function (n) { return n.kind === "lot_too_big"; }).length;
+        var under = notes.length - miss;
+        toast("已建仓 " + items.length + " 只，但 " +
+              [miss ? miss + " 只未买入" : "", under ? under + " 只欠配" : ""]
+                .filter(Boolean).join("、"));
+        setTimeout(function () {
+          alert("整手约束提示（回测按份额成交，实盘按 100 份一手）\n\n" +
+                notes.map(function (n) { return "· " + n.name + "：" + n.msg; }).join("\n") +
+                "\n\n加大投入资金或减少持仓只数可缩小缺口。");
+        }, 320);
+      } else {
+        toast("已建仓 " + items.length + " 只");
+      }
     });
   }
 

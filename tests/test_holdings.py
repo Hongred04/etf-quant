@@ -201,14 +201,43 @@ def test_build_from_weights_rounds_down():
         {"code": "sh511090", "name": "国债", "weight": 0.5, "price": 120.0},
         {"code": "sz159915", "name": "创业板", "weight": 0.5, "price": 2.7},
     ]
-    items, cash = H.build_from_weights(rows, 100000.0)
-    # 50000 / 12000 = 4 手 → 480 份；50000 / 270 = 185 手 → 18500 份
+    items, cash, notes = H.build_from_weights(rows, 100000.0)
+    # 50000 / 12000 = 4 手 → 400 份；50000 / 270 = 185 手 → 18500 份
     by = {i["code"]: i for i in items}
     assert by["sh511090"]["shares"] == 400
     assert by["sz159915"]["shares"] == 18500
     spent = sum(i["shares"] * i["cost"] for i in items)
     assert abs(spent + cash - 100000.0) < 0.01
     assert cash >= 0
+    # 高价标的手数少，取整后权重从 50% 掉到 48%，应被标记为欠配
+    assert [n["code"] for n in notes] == ["sh511090"]
+    assert notes[0]["kind"] == "underweight"
+    assert notes[0]["actual_weight"] == pytest.approx(0.48, abs=1e-6)
+
+
+def test_build_from_weights_flags_unaffordable_lot():
+    """高价 ETF 一手超预算：不能静默跳过，必须进 notes 让界面提示。"""
+    rows = [
+        {"code": "sh511090", "name": "国债", "weight": 0.5, "price": 120.0},
+        {"code": "sh510300", "name": "沪深300", "weight": 0.5, "price": 4.0},
+    ]
+    # 总资金 2 万 → 每只预算 1 万；12000 一手 > 10000，整只买不上
+    items, cash, notes = H.build_from_weights(rows, 20000.0)
+    assert [i["code"] for i in items] == ["sh510300"]
+    assert len(notes) == 1
+    assert notes[0]["code"] == "sh511090"
+    assert notes[0]["kind"] == "lot_too_big"
+    assert notes[0]["lot_cost"] == pytest.approx(12000.0)
+    assert notes[0]["budget"] == pytest.approx(10000.0)
+    assert "未买入" in notes[0]["message"]
+
+
+def test_build_from_weights_no_notes_when_clean():
+    """低价标的、资金充足时不应产生任何提示。"""
+    rows = [{"code": "sz159915", "name": "创业板", "weight": 1.0, "price": 2.0}]
+    items, cash, notes = H.build_from_weights(rows, 100000.0)
+    assert len(items) == 1
+    assert notes == []
 
 
 def test_build_from_weights_rejects_zero_amount():

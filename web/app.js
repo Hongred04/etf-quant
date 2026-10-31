@@ -1072,6 +1072,29 @@
 
     let html = "";
 
+    /* ---- 整手约束提示（只在刚建仓时有，切页或刷新即消失） ---- */
+    const buildNotes = d.build_notes || [];
+    if (buildNotes.length) {
+      const miss = buildNotes.filter((n) => n.kind === "lot_too_big");
+      const under = buildNotes.filter((n) => n.kind === "underweight");
+      html += `<div class="card reveal build-notes">
+        <div class="card-head"><div>
+          <div class="card-title">整手约束提示</div>
+          <div class="card-sub">回测按分数份额成交；实盘按 100 份一手买入，两者会有缺口</div>
+        </div></div>
+        <div class="card-body">
+          ${miss.length ? `<div class="bn-head">未买入 ${miss.length} 只 — 一手金额已超过该只预算，整只没买上</div>` : ""}
+          ${under.length ? `<div class="bn-head">欠配 ${under.length} 只 — 买到了，但取整后权重低于目标</div>` : ""}
+          <ul class="bn-list">${buildNotes.map((n) => `<li>
+            <span class="bn-tag ${n.kind}">${n.kind === "lot_too_big" ? "未买入" : "欠配"}</span>
+            <b>${esc(n.name)}</b><span class="bn-code">${esc(n.code)}</span>
+            <span class="bn-msg">${esc(n.message)}</span>
+          </li>`).join("")}</ul>
+          <div class="bn-foot">加大投入资金、或减少持仓只数，可以缩小这个缺口。回测收益未扣这部分偏差。</div>
+        </div>
+      </div>`;
+    }
+
     /* ---- 账户概览（空仓时不显示，四张 0 卡片对新手没有信息量） ---- */
     if (items.length) {
       html += `<div class="kpi-grid">
@@ -1250,7 +1273,18 @@
         }
         editingCode = null;
         renderMyHoldings();
-        toast(okText, "ok");
+        const notes = state.myholdings.build_notes || [];
+        if (notes.length) {
+          const miss = notes.filter((n) => n.kind === "lot_too_big").length;
+          const under = notes.filter((n) => n.kind === "underweight").length;
+          const parts = [
+            miss && `${miss} 只未买入`,
+            under && `${under} 只欠配`,
+          ].filter(Boolean);
+          toast(`${okText}，但整手约束导致 ${parts.join("、")}——明细见持仓页顶部`, "err", 5200);
+        } else {
+          toast(okText, "ok");
+        }
         return true;
       } catch (e) {
         toast("保存失败：" + e.message, "err");

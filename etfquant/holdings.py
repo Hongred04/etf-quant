@@ -163,18 +163,27 @@ def remove(data: dict, code: str) -> dict:
     return data
 
 
-def build_from_weights(rows: list[dict], amount: float) -> tuple[list[dict], float]:
+def build_from_weights(rows: list[dict], amount: float) -> tuple[list[dict], float, list[dict]]:
     """
     按今日信号的权重，把一笔资金摊成整手持仓（「一键建仓」）。
 
-    返回 (items, leftover_cash)。手数向下取整，剩余资金留在现金里，
-    不做「差一点就凑一手」的向上取整——那会让总投入超出用户填的金额。
+    返回 (items, leftover_cash, notes)。
+
+    手数向下取整，剩余资金留在现金里，不做「差一点就凑一手」的向上取整——
+    那会让总投入超出用户填的金额。
+
+    notes 记录两类整手约束造成的失真，供界面显式提示（不静默吞掉）：
+      · lot_too_big  —— 一手金额已超过该只预算，整只没买上
+      · underweight  —— 买到了，但取整后实际权重明显低于目标（> 1pp）
+    回测按分数份额成交、不受整手约束，实盘才会出现这两类缺口；
+    不提示的话，小资金账户会以为按信号满仓，实际却少配了一截。
     """
     amount = _to_float(amount)
     if amount <= 0:
         raise HoldingError("投入金额必须大于 0")
 
     items: list[dict] = []
+    notes: list[dict] = []
     spent = 0.0
     for r in rows or []:
         w = _to_float(r.get("weight"))
@@ -182,21 +191,46 @@ def build_from_weights(rows: list[dict], amount: float) -> tuple[list[dict], flo
         if w <= 0 or px <= 0:
             continue
         budget = amount * w
-        lots = int(budget // (px * LOT))
+        lot_cost = px * LOT
+        lots = int(budget // lot_cost)
+        name = r.get("name") or r["code"]
         if lots <= 0:
+            notes.append({
+                "code": r["code"],
+                "name": name,
+                "kind": "lot_too_big",
+                "target_weight": round(w, 4),
+                "budget": round(budget, 2),
+                "lot_cost": round(lot_cost, 2),
+                "message": (f"一手需 ¥{lot_cost:,.0f}，超过该只预算 ¥{budget:,.0f}，"
+                            f"整只未买入（目标权重 {w:.1%}）"),
+            })
             continue
         shares = lots * LOT
         cost_value = shares * px
         spent += cost_value
         items.append({
             "code": r["code"],
-            "name": r.get("name") or r["code"],
+            "name": name,
             "shares": shares,
             "cost": round(px, 4),
             "buy_date": date.today().isoformat(),
             "note": "按信号建仓",
         })
-    return items, round(max(0.0, amount - spent), 2)
+        actual_w = cost_value / amount
+        if w - actual_w > 0.01:
+            notes.append({
+                "code": r["code"],
+                "name": name,
+                "kind": "underweight",
+                "target_weight": round(w, 4),
+                "actual_weight": round(actual_w, 4),
+                "budget": round(budget, 2),
+                "lot_cost": round(lot_cost, 2),
+                "message": (f"一手 ¥{lot_cost:,.0f}，取整后实际权重 {actual_w:.1%}，"
+                            f"低于目标 {w:.1%}（少配 {(w - actual_w) * 100:.1f}pp）"),
+            })
+    return items, round(max(0.0, amount - spent), 2), notes
 
 
 # --------------------------------------------------------------------------- #

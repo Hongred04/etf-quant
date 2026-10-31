@@ -890,6 +890,7 @@ def api_holdings_write(payload: dict) -> tuple[dict, int]:
     meta = _pool_meta()
     known = {c: v["name"] for c, v in meta.items()}
     data = H.load(HOLD_FILE)
+    build_notes: list[dict] = []
 
     try:
         if op in ("add", "update"):
@@ -911,12 +912,16 @@ def api_holdings_write(payload: dict) -> tuple[dict, int]:
             data["cash"] = round(cash, 2)
         elif op == "build":
             sig = _cached("signal", 5, api_signal)
-            items, leftover = H.build_from_weights(
+            items, leftover, notes = H.build_from_weights(
                 (sig or {}).get("rows") or [], payload.get("amount")
             )
             if not items:
-                raise H.HoldingError("按这个金额买不到任何一手，请加大资金或换更低价位的标的")
+                raise H.HoldingError(
+                    "按这个金额买不到任何一手，请加大资金或换更低价位的标的"
+                    + (f"（{notes[0]['message']}）" if notes else ""))
             data = {"items": items, "cash": leftover}
+            # 整手约束造成的缺口交给界面显式提示，别让用户误以为已按信号满仓
+            build_notes = notes
         elif op == "replace":
             raw_items = payload.get("items")
             if not isinstance(raw_items, list):
@@ -932,7 +937,10 @@ def api_holdings_write(payload: dict) -> tuple[dict, int]:
 
     H.save(HOLD_FILE, data)
     invalidate_cache()
-    return api_holdings(), 200
+    resp = dict(api_holdings())
+    if build_notes:
+        resp["build_notes"] = build_notes
+    return resp, 200
 
 
 # --------------------------------------------------------------------------- #
