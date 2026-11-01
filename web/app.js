@@ -455,11 +455,44 @@
     // 17.4% 是样本内结果：29 个变体在同一段历史上比过大小。可对外引用的区间
     // 由服务端按"滚动前向锚点"算好，这里只负责显示，不在前端写第二套换算。
     // 脚注只放"预期"一项：基准年化挪进提示里，六个 KPI 并排时脚注超过一行会换行。
-    const cagrFoot = exp && exp.label ? `预期 ${exp.label}` : `基准 ${pct(bench.cagr ?? 0)}`;
+    const cagrFoot = exp && exp.label ? `对外口径 ${exp.label}` : `沪深300 ${pct(bench.cagr ?? 0)}`;
+    // 基准卡玛：用同一口径现算，缺数据时退回公式说明（不要写死 0.16）
+    const benchCalmar = (bench.cagr != null && bench.mdd) ? bench.cagr / Math.abs(bench.mdd) : null;
+
+    // 首屏第一件事回答「今天要不要操作」——历史战绩放第二屏。
+    // 数据来自 /api/signal（boot 时已预取），取不到就不显示，不阻塞页面。
+    const sig = state.signal;
+    let strip = "";
+    if (sig && !sig.error && Array.isArray(sig.rows) && sig.rows.length) {
+      const tw = sig.rows.reduce((s, r) => s + (+r.share || 0), 0) || 1;
+      const bondShare = sig.rows
+        .filter((r) => r.category === "债券")
+        .reduce((s, r) => s + (+r.share || 0), 0) / tw;
+      const STATE = {
+        holding: ["ok", "持有中 · 今天不用操作", `下次换仓 ${sig.next_reb || "—"} 收盘后再来`],
+        exec_today: ["act", "今天开盘执行调仓", "先买债券，再按占比从大到小"],
+        pending: ["wait", `${sig.exec_date || "—"} 开盘执行`, "清单已生成，等开盘"],
+        today: ["due", "今天收盘后更新数据", "明天开盘按新清单换仓"],
+        due: ["due", "清单已过期", "先更新行情并重算，否则不要按旧表下单"],
+      };
+      const [tone, title, sub] = STATE[sig.status] || ["wait", "清单待更新", "点右侧「更新行情并重算」"];
+      strip = `<div class="status-strip is-${tone}">
+        <span class="ss-dot"></span>
+        <b>${esc(title)}</b>
+        <span class="ss-sub">${esc(sub)}</span>
+        <span class="ss-pos">权益 ${pct(1 - bondShare, 0)} · 债券 ${pct(bondShare, 0)}</span>
+        <a class="ss-link" href="#signal">查看清单 →</a>
+      </div>`;
+    }
+
+    // 回撤图的"当前"读数：曲线降采样过，但末点一定是最后一日，可以直接标
+    const ddSeries = (d.drawdown && d.drawdown.self) || [];
+    const ddNow = ddSeries.length ? ddSeries[ddSeries.length - 1][1] / 100 : null;
 
     view.innerHTML = `
+      ${strip}
       <div class="kpi-grid">
-        ${kpiCard("累计收益", pct(self.cum, 1), `基准 ${pct(bench.cum ?? 0, 1)}`, cls(self.cum),
+        ${kpiCard("累计收益", pct(self.cum, 1), `沪深300 ${pct(bench.cum ?? 0, 1)}`, cls(self.cum),
           "回测区间内的总收益率：1 元最终变成多少元。这里不含年化，区间越长数值自然越大。")}
         ${kpiCard("年化收益", pct(self.cagr), cagrFoot, cls(self.cagr),
           `把总收益折算成<b>每年平均</b>的复合增长率，方便与存款、基金、指数等不同期限的产品横向比较。` +
@@ -472,11 +505,12 @@
                   + `HAC t 值 ${num(exp.alpha_t, 2)}，小于 2 就是与 0 在统计上分不开——`
                   + `换句话说，${exp.label} 是「折价后的点估计」，不是保证。详见 README 7.10。`)
             : ""))}
-        ${kpiCard("夏普比率", num(self.sharpe), `基准 ${num(bench.sharpe ?? 0)}`, "",
+        ${kpiCard("夏普比率", num(self.sharpe), `沪深300 ${num(bench.sharpe ?? 0)}`, "",
           "每承受 1 份波动能换来多少超额收益。<b>大于 1 优秀，0.5~1 可用，低于 0.5 一般</b>。它衡量的是「赚得稳不稳」，不只是赚得多不多。")}
-        ${kpiCard("最大回撤", pct(self.mdd), `基准 ${pct(bench.mdd ?? 0)}`, "down",
+        ${kpiCard("最大回撤", pct(self.mdd), `沪深300 ${pct(bench.mdd ?? 0)}`, "down",
           "从历史最高点跌到最低点的<b>最大跌幅</b>。代表最坏情况下账户会缩水多少，是判断自己能不能拿得住的关键指标。")}
-        ${kpiCard("卡玛比率", num(self.calmar), `收益 / 回撤`, "",
+        ${kpiCard("卡玛比率", num(self.calmar),
+          benchCalmar == null ? "年化收益 ÷ 最大回撤" : `沪深300 ${num(benchCalmar)}`, "",
           "年化收益 ÷ 最大回撤。数值越高，说明<b>赚的钱相对承受的回撤越划算</b>。1 表示年化收益正好等于最大回撤。")}
         ${kpiCard("年化超额", pct(self.cagr - (bench.cagr ?? 0)),
           `累计超额 ${pct(self.excess, 0)} · 信息比率 ${num(self.ir)}`,
@@ -500,13 +534,16 @@
           <div class="card-head">
             <div><div class="card-title">回撤曲线</div>
             <div class="card-sub">红色本策略 · 虚线沪深300</div></div>
+            ${ddNow == null ? "" : `<div class="dd-now">
+              <b>${pct(ddNow, 1)}</b><span>当前回撤</span></div>`}
           </div>
           <div class="card-body"><div class="chart-wrap" style="height:196px">
             <canvas id="ddChart"></canvas></div></div>
         </div>
         <div class="card reveal">
           <div class="card-head">
-            <div><div class="card-title">年度收益</div></div>
+            <div><div class="card-title">年度收益</div>
+            <div class="card-sub">柱上为该年 TGAR 收益</div></div>
             <div class="legend" id="yearLegend"></div>
           </div>
           <div class="card-body"><div class="bars" id="yearBars"></div></div>
@@ -596,12 +633,14 @@
             style="height:${h}%;background:${colors[i]}"
             title="${esc(n)} ${y}年: ${v.toFixed(2)}%"></div>`);
       });
+      const selfV = d.annual[SELF]?.[y];
       return `<div class="bar-group">
         <div class="bar-stack">
           <div class="bar-half up">${up.join("")}</div>
           <div class="bar-half down">${down.join("")}</div>
         </div>
-        <div class="bar-year">${y.slice(2)}</div>
+        <div class="bar-year">${y.slice(2)}${selfV == null ? ""
+          : `<i class="${selfV >= 0 ? "up" : "down"}">${selfV >= 0 ? "+" : ""}${selfV.toFixed(0)}%</i>`}</div>
       </div>`;
     }).join("");
 
@@ -827,6 +866,7 @@
       localStorage.setItem("etfquant-cash", String(cash));
 
       let total = 0;
+      let gapSum = 0;
       const body = rows.map((r, i) => {
         const w = r.share / tw;
         const target = cash * w;
@@ -836,6 +876,16 @@
         const actual = shares * r.price;
         total += actual;
         const short = lots === 0;
+        const gap = target - actual;                 // 取整后没买上的金额
+        gapSum += gap;
+        const gapBad = !short && target > 0 && gap / target > 0.01;
+        // 决策现场提示：这张表才是实际下单的地方，欠配/买不起必须标在行上，
+        // 不能等到「我的持仓」建仓之后才告诉用户。
+        const gapNote = short
+          ? `<span class="lot-gap">一手 ¥${Math.round(lotCost).toLocaleString("zh-CN")} 超预算</span>`
+          : gapBad
+            ? `<span class="lot-gap">缺 ¥${Math.round(gap).toLocaleString("zh-CN")}</span>`
+            : "";
         return `<tr${short ? ' class="row-warn"' : ""}>
           <td class="dim">${i + 1}</td>
           <td style="text-align:left">
@@ -846,9 +896,9 @@
           <td>${(w * 100).toFixed(1)}%</td>
           <td class="dim">${fmtMoney(target)}</td>
           <td>${r.price.toFixed(3)}${r.price_stale
-            ? ` <span class="up" title="该标的最新行情只到 ${esc(r.price_date)}">⚠</span>` : ""}</td>
+            ? ` <span class="up" title="该标的（${esc(r.code)}）最新行情只到 ${esc(r.price_date)}">⚠</span>` : ""}</td>
           <td class="strong">${short ? '<span class="up">不足1手</span>' : lots + " 手"}</td>
-          <td class="strong">${short ? "—" : fmtMoney(actual)}</td>
+          <td class="strong">${short ? "—" : fmtMoney(actual)}${gapNote}</td>
         </tr>`;
       }).join("");
 
@@ -866,6 +916,12 @@
         $("#orderFoot").innerHTML += `<tr><td colspan="8" style="text-align:left;font-weight:400">
           <span class="up"><b>至少需要 ${fmtMoney(minCash)}</b> 才能每只买满 1 手；当前资金有标的买不进，
           实际持仓会与信号不一致。</span></td></tr>`;
+      } else if (cash > 0 && left > 0.5) {
+        const gapPct = (left / cash) * 100;
+        $("#orderFoot").innerHTML += `<tr><td colspan="8" class="lot-gap-row">
+          整手取整后有 <b>${fmtMoney(left)}</b>（${gapPct.toFixed(1)}%）留在现金，买不进去。
+          回测按分数份额计算、没有这个缺口；资金越小、标的越贵，偏差越大。
+          建议按「实付」列下单，不要凑整。</td></tr>`;
       }
     }
 
@@ -2256,7 +2312,8 @@
 
   async function updateBadge() {
     try {
-      const s = state.signal || (await api("/api/signal"));
+      if (!state.signal) state.signal = await api("/api/signal");
+      const s = state.signal;
       if (!s.error && s.rows) {
         const badge = $("#navBadge");
         badge.textContent = s.rows.length;
@@ -2293,7 +2350,8 @@
       state.overview = await api("/api/overview");
     } catch (e) { /* noop */ }
     updateFoot();
-    updateBadge();
+    // 首屏状态条要回答「今天该不该操作」，所以信号必须先到位再渲染总览
+    await updateBadge();
 
     const initial = location.hash.slice(1);
     await loadPage(PAGES[initial] ? initial : "overview");

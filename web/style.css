@@ -341,6 +341,8 @@ html, body {
   font-size: 11.5px;
   color: var(--txt-3);
   margin-top: 2px;
+  max-width: 82ch;          /* 结论型长句自动折行；短副标题不受影响 */
+  line-height: 1.7;
 }
 .card-body { padding: 0 18px 18px; }
 .card-body.flush { padding: 0 0 6px; }
@@ -348,10 +350,50 @@ html, body {
 /* ---------------------------------------------------------- KPI */
 .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 11px;
+  /* 6 张卡片改成 3 列 × 2 行：1440 宽下每卡约 380px。
+     之前 auto-fit 150px 会挤成 6 列一行，数字和脚注互相压。 */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
   margin-bottom: 13px;
 }
+@media (max-width: 1080px) {
+  .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* 首屏状态条：回答「今天要不要操作」。比 KPI 更靠上，视觉权重也更高 */
+.status-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 11px 16px;
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--panel);
+  font-size: 13px;
+}
+.status-strip .ss-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--txt-3); flex: none;
+}
+.status-strip b { font-size: 14px; font-weight: 620; letter-spacing: -0.01em; }
+.status-strip .ss-sub { color: var(--txt-2); font-size: 12.5px; }
+.status-strip .ss-pos {
+  margin-left: auto; color: var(--txt-2); font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.status-strip .ss-link {
+  color: var(--accent); text-decoration: none; font-size: 12.5px; font-weight: 550;
+  white-space: nowrap;
+}
+.status-strip .ss-link:hover { text-decoration: underline; }
+.status-strip.is-ok .ss-dot { background: var(--down); box-shadow: 0 0 8px rgba(46, 189, 133, 0.55); }
+.status-strip.is-act .ss-dot { background: var(--accent); box-shadow: 0 0 8px var(--accent-soft); }
+.status-strip.is-act { border-color: color-mix(in srgb, var(--accent) 38%, transparent); }
+.status-strip.is-wait .ss-dot { background: var(--gold); }
+.status-strip.is-due .ss-dot { background: var(--up); box-shadow: 0 0 8px rgba(246, 70, 93, 0.55); }
+.status-strip.is-due { border-color: rgba(246, 70, 93, 0.35); }
 
 .kpi {
   position: relative;
@@ -372,7 +414,7 @@ html, body {
   background: radial-gradient(circle, rgba(109, 140, 255, 0.1), transparent 70%);
 }
 .kpi-label {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 550;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -381,7 +423,7 @@ html, body {
 }
 .kpi-value {
   margin-top: 7px;
-  font-size: 26px;
+  font-size: 29px;
   font-weight: 620;
   letter-spacing: -0.028em;
   font-variant-numeric: tabular-nums;
@@ -391,7 +433,7 @@ html, body {
 .kpi-value.down { color: var(--down); }
 .kpi-foot {
   margin-top: 6px;
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--txt-3);
   font-variant-numeric: tabular-nums;
   display: flex;
@@ -502,7 +544,35 @@ html, body {
   font-size: 10px;
   color: var(--txt-3);
   font-variant-numeric: tabular-nums;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  justify-content: center;
+  white-space: nowrap;
 }
+.bar-year i {
+  font-style: normal;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* 回撤卡的当前读数：把「现在回撤多少」直接标在标题旁，不用去图上找 */
+.dd-now {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  line-height: 1.15;
+}
+.dd-now b {
+  font-size: 17px;
+  font-weight: 620;
+  color: var(--down);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+.dd-now span { font-size: 10px; color: var(--txt-3); }
 
 /* 高亮行 */
 .row-hl td { background: rgba(233, 185, 73, 0.055); }
@@ -622,6 +692,8 @@ tfoot td:first-child { text-align: left; padding-left: 18px; }
   color: var(--gold-text);
   line-height: 1.65;
 }
+/* 长结论别跨满 1400px：一行 100+ 字很难读，76~82 字符是常规上限 */
+.note > div { max-width: 76ch; }
 .note svg { width: 15px; height: 15px; flex: none; margin-top: 1.5px; color: var(--gold); }
 .note.danger {
   background: rgba(246, 70, 93, 0.06);
@@ -1235,6 +1307,10 @@ html[data-theme="light"] .ico-moon { display: none; }
   border: 1px solid var(--line);
   border-radius: 9px;
   flex-wrap: wrap;
+  /* 容器按内容收窄：否则整条背景会拉满父级宽度，
+     看起来像一个超长输入框（账户设置那里最明显） */
+  width: fit-content;
+  max-width: 100%;
 }
 .cash-unit { color: var(--txt-3); font-size: 13px; }
 .cash-box input {
@@ -1258,6 +1334,26 @@ html[data-theme="light"] .ico-moon { display: none; }
 .order-table td { padding: 11px 10px; }
 .row-warn td { background: rgba(246, 70, 93, 0.045); }
 .order-table tfoot td { padding: 11px 10px; }
+
+/* 整手取整造成的欠配：标在「实付」列下方，决策现场直接可见 */
+.lot-gap {
+  display: block;
+  margin-top: 2px;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+}
+.lot-gap-row {
+  padding: 10px 12px !important;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.75;
+  color: var(--txt-2);
+  text-align: left;
+  background: color-mix(in srgb, var(--gold) 7%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--gold) 26%, transparent);
+}
 
 /* ---------------------------------------------------------- 建仓整手约束提示 */
 .build-notes { border-color: color-mix(in srgb, var(--gold) 42%, transparent); }
