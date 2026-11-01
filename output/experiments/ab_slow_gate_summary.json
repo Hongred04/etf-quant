@@ -1,0 +1,39 @@
+{
+  "generated_at": "2026-11-01T10:58:55",
+  "data_end": "2026-10-30",
+  "variants": {
+    "V1-分位<20%上限50%": {
+      "d_calmar": -0.0033798561167955876,
+      "d_mdd": 0.010786406798190762,
+      "d_cagr": -0.007286411463392595,
+      "criterion_effect": false,
+      "sub_calmar_delta": {
+        "20-22": 0.0,
+        "23-26": -0.053437909701418485
+      },
+      "criterion_robust": false
+    },
+    "V2-再<10%归零": {
+      "d_calmar": 0.06451313700967831,
+      "d_mdd": 0.010786406798191206,
+      "d_cagr": 0.01157773480265889,
+      "criterion_effect": true,
+      "sub_calmar_delta": {
+        "20-22": 0.0,
+        "23-26": 0.0965695104176858
+      },
+      "criterion_robust": false
+    }
+  },
+  "placebo": {
+    "n": 200,
+    "seed": 20261101,
+    "real_delta_v1": -0.0033798561167955876,
+    "placebo_mean": -0.031456259103418864,
+    "placebo_p50": 0.0,
+    "placebo_p90": 0.0,
+    "placebo_p95": 0.0,
+    "p_value_one_sided": 0.665,
+    "criterion_significant": false
+  }
+}

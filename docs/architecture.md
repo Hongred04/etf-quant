@@ -73,6 +73,7 @@
 | `meta` | 研究 | 元标签：模型决定仓位（负结果） | research |
 | `shares` | 研究 | ETF 份额（申赎）采集 | research |
 | `alpha_track` | 研究 | alpha 随时间衰减的跟踪 | research |
+| `slow_gate` | 研究 | 慢变量仓位上限：股债相对强弱 5 年分位（试验 7.17） | research |
 
 ## 2. 数据流（一次更新的完整路径）
 

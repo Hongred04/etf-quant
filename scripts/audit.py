@@ -418,6 +418,20 @@ def main() -> None:
     else:
         ok("预注册文档与 hash 成对存在", False, "缺预注册文档或其 hash 文件")
 
+    # 试验级预注册（prereg_*.md）也必须配对校验：冻结了却没人检查，
+    # 就等于允许"看完结果再改判据"——那正是预注册要防的事。
+    pregs = sorted((ROOT / "docs").glob("prereg_*.md"))
+    if pregs:
+        stale = []
+        for md in pregs:
+            hfp = ROOT / "data" / (md.stem + ".sha256")
+            if not hfp.exists():
+                stale.append(f"{md.stem} 缺 hash")
+            elif hfp.read_text(encoding="utf-8").strip() != _hash.sha256(md.read_bytes()).hexdigest():
+                stale.append(f"{md.stem} 已在冻结后被改动")
+        ok("试验级预注册 hash 全部匹配", not stale, "；".join(stale),
+           f"{len(pregs)} 份试验预注册冻结有效")
+
     mf = ROOT / "output" / "manifest.json"
     if mf.exists():
         try:
@@ -447,7 +461,7 @@ def main() -> None:
         "rebalance", "io_utils", "cli", "__main__",
     }
     RESEARCH = {"placebo", "chan", "dual_mom", "resid_mom", "macross", "meta",
-                "shares", "alpha_track"}
+                "shares", "alpha_track", "slow_gate"}
     TOOLS = {"diagnostics", "overfit", "monthly"}
     # 有意保留的例外（写进 strategy 的 docstring，不是漏网）：
     ALLOWED = {("strategy", "secondary")}

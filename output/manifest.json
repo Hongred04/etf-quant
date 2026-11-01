@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-11-01 10:43",
+  "generated_at": "2026-11-01 11:07",
   "n_cache_files": 261,
-  "inputs_sha": "e04c9b28f1492025d60821f5a78ea8de0c41d7ecd138624a6cf8c0cca0a016d4",
+  "inputs_sha": "c33e875e39811c502dbf2e417e79a7baa4f5e7f41e02862c8c471c26f15d9704",
   "inputs": {
     "data/etf_pool.csv": "8732a263fc21e534d3d28f30ed266adc67929250cf4091a4c64f092186c86a3b",
     "data/cache/kline_qfq/sh510050.csv": "9d610d8949303848b07e0012f329e9f105525fc8a482da0ac1a7582a82991e5b",
@@ -271,6 +271,6 @@
     "output/perf_main.csv": "0c3a3cf017c291522bf6f7d01a3db0a4861753ea50a4ca2cbc0d007865701e9f",
     "output/diagnostics.json": "d064ae624678731e4100a9a79b8e3cbb1d1440794b8905cea2131a31edf5d8ab",
     "output/overfit_summary.json": "67b2bbf17a2c8989b603b47fdb33e8359e96d86508e57d9d4f6ec4aebc71f1cf",
-    "output/dsr.json": "39a3848403c1b931a2d95be6a80172d331b0751f46abfd47657bc5ee3da3c850"
+    "output/dsr.json": "69b002751ef86960c11fffc0e47f2c073759bddc7e2023aab99443dece7d187b"
   }
 }
