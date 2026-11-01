@@ -37,3 +37,5 @@ desktop.ini
 
 # ---- 自动化任务的本地记忆（运行时生成，不属于项目代码）----
 .workbuddy/
+# 实盘跟踪的落盘缓存（可重建，不进仓库）
+output/track_cache.json

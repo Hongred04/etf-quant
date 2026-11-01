@@ -110,6 +110,9 @@ TASKS: dict[str, dict] = {}
 TASK_LOCK = threading.Lock()
 CACHE: dict[str, tuple[float, object]] = {}
 CACHE_LOCK = threading.Lock()
+# 实盘跟踪的落盘缓存 + 构建锁（冷启动约 7 秒，必须避免重复计算）
+TRACK_CACHE = OUT / "track_cache.json"
+TRACK_LOCK = threading.Lock()
 
 
 def _clean_json(obj):
@@ -153,6 +156,9 @@ def _cached(key: str, ttl: float, fn):
 def invalidate_cache() -> None:
     with CACHE_LOCK:
         CACHE.clear()
+    # 数据已变，实盘跟踪的落盘缓存也失效了（指纹对不上）。
+    # 在后台重算一次：等用户点开那一页时已经是热的，而不是当场等 7 秒。
+    threading.Thread(target=_warm_caches, daemon=True, name="warm-after-update").start()
 
 
 def start_task(action: str) -> str:
@@ -1127,23 +1133,78 @@ def _strategy_targets(panel) -> dict:
     return _cached("track_targets", 300, lambda: TrendGatedAdaptive(panel).generate())
 
 
+def _track_fp() -> str:
+    """实盘跟踪缓存的输入指纹：归档文件 mtime + 行情末日。
+
+    任一项变化即失效。用 mtime 而不是内容 hash，是为了省掉每次读几万行 CSV 的开销。
+    """
+    parts = []
+    arch = DATA / "signal_archive.csv"
+    if arch.exists():
+        parts.append(str(arch.stat().st_mtime_ns))
+    inv = _csv(DATA / "etf_history_inventory.csv", dtype=str)
+    if inv is not None and "end" in inv.columns:
+        vals = [str(v) for v in inv["end"].dropna().tolist() if len(str(v)) == 10]
+        if vals:
+            parts.append(max(set(vals), key=vals.count))
+    return "|".join(parts) or "empty"
+
+
+def _track_from_disk() -> dict | None:
+    if not TRACK_CACHE.exists():
+        return None
+    try:
+        blob = json.loads(TRACK_CACHE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return blob.get("data") if blob.get("fp") == _track_fp() else None
+
+
+def _track_to_disk(data: dict) -> None:
+    try:
+        TRACK_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = TRACK_CACHE.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps({"fp": _track_fp(), "data": data}, ensure_ascii=False),
+                       encoding="utf-8")
+        tmp.replace(TRACK_CACHE)
+    except OSError:
+        pass
+
+
 def api_track() -> dict:
-    """实盘跟踪：归档多久、纸上净值多少、与同期回测差多少。"""
-    from etfquant import track as T
+    """实盘跟踪：归档多久、纸上净值多少、与同期回测差多少。
 
-    arch = T.load_archive(T.archive_path(DATA))
-    if arch.empty:
-        return {"count": 0, "periods": [], "series": [], "paper": None, "backtest": None,
-                "live_count": 0, "backfill_count": 0,
-                "hint": "还没有归档信号。运行一次「生成选股信号」后开始记录。"}
+    冷启动要跑一遍完整策略（约 7 秒），这是本服务最慢的接口。因此结果落盘缓存，
+    并在 start 时后台预热：用户点开页面时直接命中，而不是当场等。
+    指纹变了（归档更新 / 行情推进）才重算。
+    """
+    disk = _track_from_disk()
+    if disk is not None:
+        return disk
 
-    panel = _track_panel()
-    res = T.build_track(panel, _strategy_targets(panel), arch)
-    res["hint"] = (
-        "backfill 期是事后用当前策略回放出来的，只用于垫底展示，不等于当时真实给出的建议。"
-        if res.get("backfill_count") else ""
-    )
-    return _clean_json(res)
+    # 预热线程与用户请求可能同时到达：加锁做双检，避免重复算两遍 7 秒
+    with TRACK_LOCK:
+        disk = _track_from_disk()
+        if disk is not None:
+            return disk
+
+        from etfquant import track as T
+
+        arch = T.load_archive(T.archive_path(DATA))
+        if arch.empty:
+            return {"count": 0, "periods": [], "series": [], "paper": None, "backtest": None,
+                    "live_count": 0, "backfill_count": 0,
+                    "hint": "还没有归档信号。运行一次「生成选股信号」后开始记录。"}
+
+        panel = _track_panel()
+        res = T.build_track(panel, _strategy_targets(panel), arch)
+        res["hint"] = (
+            "backfill 期是事后用当前策略回放出来的，只用于垫底展示，不等于当时真实给出的建议。"
+            if res.get("backfill_count") else ""
+        )
+        res = _clean_json(res)
+        _track_to_disk(res)
+        return res
 
 
 def api_universe() -> dict:
@@ -1726,6 +1787,18 @@ def find_port(start: int = 8800, tries: int = 40) -> int:
     raise RuntimeError("找不到可用端口")
 
 
+def _warm_caches() -> None:
+    """启动后在后台预热最慢的接口。
+
+    实盘跟踪冷启动要跑一遍完整策略（约 7 秒）——不预热的话，用户点开那一页
+    才开始算，会以为界面卡住了。结果会落盘，所以下次启动通常直接命中缓存。
+    """
+    try:
+        api_track()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=0)
@@ -1753,6 +1826,9 @@ def main() -> int:
 
     if not args.no_browser:
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()
+
+    # 预热最慢的接口（实盘跟踪），放后台线程：不挡首屏，也不挡端口监听
+    threading.Thread(target=_warm_caches, daemon=True, name="warm").start()
 
     try:
         srv.serve_forever()
