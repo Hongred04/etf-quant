@@ -22,6 +22,50 @@ from etfquant.io_utils import atomic_to_csv
 from etfquant.universe import classify_etf, dedup_same_index, universe_summary
 
 
+def _write_inventory(pool: pd.DataFrame, frames: dict, root: Path) -> None:
+    """把**缓存现状**写进清单（data/etf_history_inventory.csv）。
+
+    清单必须反映"实际落盘的数据"，而不是"这次下载想拿到的数据"：
+    strip_partial_day 会把覆盖不足的那一天从缓存里删掉，若此时不刷新清单，
+    界面就会一直认为行情已经到那天——2026-10-30 正是这样卡住的
+    （清单记 10-30，缓存实际停在 10-29，于是"回测落后"提示永远消不掉，
+    用户重跑多少次回测都没用，因为缺的是行情不是回测）。
+
+    本次没下载成功的标的保留上一次的记录，避免一次网络抖动把清单打残。
+    """
+    inv_fp = root / "data" / "etf_history_inventory.csv"
+    prev: dict[str, dict] = {}
+    if inv_fp.exists():
+        try:
+            old = pd.read_csv(inv_fp, dtype=str)
+            if {"ticker", "end"} <= set(old.columns):
+                prev = old.set_index("ticker").to_dict("index")
+        except (OSError, ValueError, KeyError):
+            prev = {}
+    meta = pool.set_index("ticker")
+    rows = []
+    for tk in pool["ticker"].tolist():
+        df = frames.get(tk)
+        if df is not None and len(df) and "date" in df:
+            rows.append({
+                "ticker": tk,
+                "name": meta.loc[tk, "name"] if tk in meta.index else "",
+                "category": meta.loc[tk, "category"] if tk in meta.index else "",
+                "start": df["date"].min().date(),
+                "end": df["date"].max().date(),
+                "bars": len(df),
+            })
+        elif tk in prev:
+            rows.append({"ticker": tk, **{k: v for k, v in prev[tk].items() if k != "ticker"}})
+    if not rows:
+        return
+    inv = pd.DataFrame(rows).sort_values("bars", ascending=False)
+    atomic_to_csv(inv, inv_fp, index=False, encoding="utf-8-sig")
+    end_cnt = inv["end"].value_counts()
+    top = f"{end_cnt.index[0]}（{end_cnt.iloc[0]} 只）" if len(end_cnt) else "-"
+    print(f"[OK] 清单已按缓存现状刷新：最新交易日 {top}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--start", default="2018-01-01")
@@ -62,7 +106,9 @@ def main() -> int:
         return 1
     if n_ok < n_all * 0.5:
         print(f"[FAIL] 只抓到 {n_ok}/{n_all}（超过半数失败），按失败处理："
-              f"不写清单，避免下游把残缺数据当成最新。")
+              f"清单按实际缓存刷新，下游仍以清单为准。")
+        # 成功的那些标的缓存已经更新了，清单要如实反映；否则界面日期会与缓存脱节
+        _write_inventory(pool, frames, ROOT)
         return 2
 
     # 当日 K 线收得比别家慢：只落库一部分时整天丢弃（缓存已同步裁掉那一天），
@@ -74,6 +120,9 @@ def main() -> int:
               f"已整天丢弃（{partial['dropped']} 只缓存已回写裁剪）。")
         print("       收盘后数据是分批落库的，等 5~10 分钟再点一次更新即可。"
               "现在回测会停在上一交易日，不会拿半天数据算收益。")
+        # 关键：缓存已被裁剪，清单必须跟着退回上一交易日，否则界面永远认为
+        # 行情已到这天，"回测落后"提示消不掉（用户重跑回测也没用）。
+        _write_inventory(pool, frames, ROOT)
         return 3
 
     print(f"[OK] 下载完成 {n_ok}/{n_all} 只，耗时 {time.time() - t0:.1f}s"
@@ -91,24 +140,9 @@ def main() -> int:
         for tk, d in list(gaps.items())[:10]:
             print(f"       {tk}  最大缺口 {d} 天")
 
-    # 落盘一份可读清单：代码/名称/类别/首末日期/样本数
-    rows = []
-    meta = pool.set_index("ticker")
-    for tk, df in frames.items():
-        rows.append(
-            {
-                "ticker": tk,
-                "name": meta.loc[tk, "name"] if tk in meta.index else "",
-                "category": meta.loc[tk, "category"] if tk in meta.index else "",
-                "start": df["date"].min().date(),
-                "end": df["date"].max().date(),
-                "bars": len(df),
-            }
-        )
-    inv = pd.DataFrame(rows).sort_values("bars", ascending=False)
-    atomic_to_csv(inv, ROOT / "data" / "etf_history_inventory.csv", index=False, encoding="utf-8-sig")
-    print(inv.head(15).to_string(index=False))
-    print(f"\n[OK] 清单写入 data/etf_history_inventory.csv")
+    # 落盘一份可读清单：代码/名称/类别/首末日期/样本数（统一走 _write_inventory）
+    _write_inventory(pool, frames, ROOT)
+    print(pd.read_csv(ROOT / "data" / "etf_history_inventory.csv").head(15).to_string(index=False))
     return 0
 
 

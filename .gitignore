@@ -34,3 +34,6 @@ mobile/shots/
 Thumbs.db
 desktop.ini
 *.swp
+
+# ---- 自动化任务的本地记忆（运行时生成，不属于项目代码）----
+.workbuddy/

@@ -1,13 +1,13 @@
 {
   "date": "2026-10-26",
   "rebalance_date": "2026-10-26",
-  "data_date": "2026-10-29",
+  "data_date": "2026-10-30",
   "exec_date": "2026-10-27",
   "next_rebalance": "2026-11-02",
   "next_estimated": true,
   "rebalance_freq": 5,
-  "days_to_next": 2,
-  "held_days": 2,
+  "days_to_next": 1,
+  "held_days": 3,
   "strategy": "S4-TGAR(自研)",
   "regime": 0.0,
   "exposure": 0.5,
@@ -17,5 +17,5 @@
   "note": "跨境/商品类标的的仓位同样受 A 股状态闸门约束；实盘建议按资产类别独立判定市场状态。",
   "stale_price_count": 0,
   "stale_price_names": [],
-  "generated_at": "2026-10-30 08:47:02"
+  "generated_at": "2026-11-01 10:43:07"
 }
