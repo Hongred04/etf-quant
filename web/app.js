@@ -556,8 +556,9 @@
 
       <div class="note mt">
         <svg viewBox="0 0 24 24" fill="none"><path d="M12 8.5v5M12 16.6v.1" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/></svg>
-        <div>超额收益的<b>大部分来自 2023—2026 段</b>，2019—2022 段仅与基准持平但回撤更浅。
-        这是一个「熊市抗跌 + 结构性行情中捕捉行业轮动」的模型，而非全天候跑赢。详见「效果验证」。</div>
+        <div>超额收益<b>几乎全部来自 2024 年以后</b>：2019—2023 累计超额仅 +0.9pp，
+        其中 <b>2019—2021 段跑输基准约 9pp</b>（结构性牛市里闸门降仓的固有代价），2022—2024 段才明显领先。
+        这是一个「震荡与熊市抗跌、牛市跟涨不足」的模型，不是全天候跑赢。详见「效果验证」。</div>
       </div>
     `;
 
@@ -1833,7 +1834,8 @@
             </div>
             <div class="note mt" style="margin-top:16px">
               <svg viewBox="0 0 24 24" fill="none"><path d="M12 8.5v5M12 16.6v.1" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/></svg>
-              <div>前段仅与基准持平（但回撤浅 14pct），超额几乎全部来自后段。
+              <div>前段并非「持平」：<b>2019—2021 跑输基准约 9pp</b>（牛市里闸门降仓的代价），
+              2022—2024 才转为领先，超额几乎全部来自 2024 年以后。
               不做「全天候跑赢」的假设，是使用该策略的前提。</div>
             </div>
           </div>
