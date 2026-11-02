@@ -132,6 +132,45 @@ def period_spans(index: pd.DatetimeIndex, signal_dates: list[pd.Timestamp]) -> l
     return out
 
 
+def signal_fidelity(
+    archived: pd.DataFrame, strategy_targets: dict, tol: float = 1e-4
+) -> list[dict]:
+    """逐期比对「live 归档信号」与「回测在同一天给出的目标权重」。
+
+    为什么这是前向验证的前提
+    ------------------------
+    纸上净值只有在"记录的信号 = 策略当日真实输出"时才是在检验策略。
+    如果两者不一致（手工改过、用了旧参数、归档时价格口径不同），
+    后面算出来的偏差就不能归因于市场——它测的是另一套东西。
+
+    只比 live 期：backfill 是用**当前**策略回放的，与回测按构造一致，
+    拿它来证明"信号保真"是循环论证。
+    """
+    if archived is None or archived.empty or "source" not in archived.columns:
+        return []
+    live = archived[archived["source"] == "live"]
+    if live.empty:
+        return []
+    out: list[dict] = []
+    for d, grp in live.groupby("signal_date"):
+        ts = pd.Timestamp(str(d))
+        w_live = {str(c): float(w) for c, w in zip(grp["code"], grp["weight"])}
+        w_bt = {str(k): float(v) for k, v in (strategy_targets.get(ts) or {}).items()}
+        codes = set(w_live) | set(w_bt)
+        l1 = sum(abs(w_live.get(c, 0.0) - w_bt.get(c, 0.0)) for c in codes) / 2.0
+        max_diff = max((abs(w_live.get(c, 0.0) - w_bt.get(c, 0.0)) for c in codes), default=0.0)
+        out.append({
+            "signal_date": ts.strftime("%Y-%m-%d"),
+            "n_live": len(w_live),
+            "n_backtest": len(w_bt),
+            "overlap": len(set(w_live) & set(w_bt)),
+            "l1": round(float(l1), 6),
+            "max_diff": round(float(max_diff), 6),
+            "match": bool(set(w_live) == set(w_bt) and max_diff <= tol),
+        })
+    return out
+
+
 def build_track(panel, strategy_targets: dict, archived: pd.DataFrame) -> dict:
     """
     计算纸上净值，并与"同期回测"对齐比较。
@@ -206,6 +245,37 @@ def build_track(panel, strategy_targets: dict, archived: pd.DataFrame) -> dict:
         p["cum"] = (round(float(p_nav.loc[t] / base - 1), 6)
                     if t is not None and t in p_nav.index and base > 0 else None)
 
+    # 前向验证：live 期从首期执行日到数据末日的偏差，与回填期分开算。
+    # 全样本的 paper-vs-backtest 在回填段按构造恒等，把它算进"偏差"会稀释问题。
+    fidelity = signal_fidelity(archived, strategy_targets)
+    live_all = [p for p in periods if p.get("source") == "live"]
+    live_exec = [p["exec_date"] for p in live_all if p.get("exec_date")]
+    fwd = {
+        "live_periods": len(live_all),        # 已归档的 live 期数（含待执行）
+        "live_executed": len(live_exec),      # 已产生实际持有收益的期数
+        "live_days": 0,
+        "divergence": None,
+        "verdict": "还没有 live 记录",
+        "need": 8,
+    }
+    if live_exec:
+        start = min(live_exec)
+        sub = [s for s in series if s["date"] >= start]
+        if len(sub) >= 2:
+            dp = sub[-1]["paper"] / sub[0]["paper"] - 1
+            db = sub[-1]["backtest"] / sub[0]["backtest"] - 1
+            fwd["live_days"] = len(sub)
+            fwd["divergence"] = round(float(dp - db), 6)
+            # 保真度是前提：信号不一致时，"样本不足"这种软结论会掩盖真正的问题
+            if any(not f["match"] for f in fidelity):
+                fwd["verdict"] = "信号与回测不一致，先查归档"
+            elif fwd["live_executed"] < fwd["need"]:
+                fwd["verdict"] = "样本不足，只看方向不做结论"
+            elif abs(fwd["divergence"]) <= 0.01:
+                fwd["verdict"] = "与回测一致"
+            else:
+                fwd["verdict"] = "偏差偏大，需要排查"
+
     return {
         "count": len(dates),
         "first": str(dates[0].date()),
@@ -222,6 +292,8 @@ def build_track(panel, strategy_targets: dict, archived: pd.DataFrame) -> dict:
         },
         "series": series,
         "periods": periods,
+        "fidelity": fidelity,
+        "forward": fwd,
         "live_count": int(archived.groupby("signal_date")["source"].first().eq("live").sum()),
         "backfill_count": int(archived.groupby("signal_date")["source"].first().eq("backfill").sum()),
     }

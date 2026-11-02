@@ -112,6 +112,9 @@ CACHE: dict[str, tuple[float, object]] = {}
 CACHE_LOCK = threading.Lock()
 # 实盘跟踪的落盘缓存 + 构建锁（冷启动约 7 秒，必须避免重复计算）
 TRACK_CACHE = OUT / "track_cache.json"
+# 落盘结构版本：加了 fidelity/forward 字段后旧缓存必须作废，
+# 否则升级当天页面会读到一个没有这些字段的旧 payload（指纹只看数据日期，不看代码）。
+TRACK_SCHEMA = 3
 TRACK_LOCK = threading.Lock()
 
 
@@ -1182,15 +1185,17 @@ def _track_from_disk() -> dict | None:
         blob = json.loads(TRACK_CACHE.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    return blob.get("data") if blob.get("fp") == _track_fp() else None
+    if blob.get("fp") != _track_fp() or blob.get("v") != TRACK_SCHEMA:
+        return None
+    return blob.get("data")
 
 
 def _track_to_disk(data: dict) -> None:
     try:
         TRACK_CACHE.parent.mkdir(parents=True, exist_ok=True)
         tmp = TRACK_CACHE.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps({"fp": _track_fp(), "data": data}, ensure_ascii=False),
-                       encoding="utf-8")
+        tmp.write_text(json.dumps({"v": TRACK_SCHEMA, "fp": _track_fp(), "data": data},
+                                  ensure_ascii=False), encoding="utf-8")
         tmp.replace(TRACK_CACHE)
     except OSError:
         pass

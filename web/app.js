@@ -1025,6 +1025,41 @@
         "纸上净值 − 同期回测。回填期由同一策略生成，应当吻合；出现偏差说明记账或对齐有问题。")}
     </div>`;
 
+    /* 前向验证：先确认"记录的信号就是策略给的"，再谈偏差。
+       只有 2 期 live 时任何结论都不成立，所以把门槛写死在界面上。 */
+    const fwd = d.forward || { live_periods: 0, live_days: 0, divergence: null, verdict: "还没有 live 记录", need: 8 };
+    const fid = d.fidelity || [];
+    // 偏差小到 0.005pp 以下就不上色：给 0.00pp 涂红戴绿只会制造噪音
+    const fwdCls = fwd.divergence == null || Math.abs(fwd.divergence) < 5e-5 ? "" : cls(fwd.divergence);
+    const fwdCard = `
+      <div class="card reveal">
+        <div class="card-head"><div>
+          <div class="card-title">前向验证 · live 信号保真度</div>
+          <div class="card-sub">live 归档与回测同日目标逐期对照；不一致时，纸上净值测的就不是这套策略</div>
+        </div><span class="src-tag live">${fwd.live_periods} 期</span></div>
+        <div class="card-body">
+          <div class="fwd-stats">
+            <div><span>已记录 / 已执行</span><b>${fwd.live_periods} 期 · 已执行 ${fwd.live_executed ?? 0} 期</b></div>
+            <div><span>live 段偏差 · ${fwd.live_days} 个交易日</span><b class="${fwdCls}">${fwd.divergence == null ? "—" : `${fwd.divergence >= 0 ? "+" : ""}${(fwd.divergence * 100).toFixed(2)}pp`}</b></div>
+            <div><span>判定</span><b>${esc(fwd.verdict)}</b></div>
+          </div>
+          ${fid.length ? `<div class="table-wrap"><table>
+            <thead><tr><th style="text-align:left">信号日</th><th>持仓（live/回测）</th><th>重合</th><th>权重 L1</th><th>最大偏差</th><th>结论</th></tr></thead>
+            <tbody>${fid.map((r) => `<tr>
+              <td style="text-align:left" class="mono">${esc(r.signal_date)}</td>
+              <td>${r.n_live} / ${r.n_backtest}</td>
+              <td>${r.overlap} 只</td>
+              <td>${(r.l1 * 100).toFixed(2)}pp</td>
+              <td>${(r.max_diff * 100).toFixed(2)}pp</td>
+              <td>${r.match ? '<span class="down">一致</span>' : '<span class="up">不一致</span>'}</td>
+            </tr>`).join("")}</tbody>
+          </table></div>` : '<div class="empty">还没有 live 归档，运行一次「生成选股信号」后开始记录。</div>'}
+          ${(fwd.live_executed ?? 0) < (fwd.need || 8)
+            ? `<div class="note mt">已执行 <b>${fwd.live_executed ?? 0}</b> 期，还差 <b>${(fwd.need || 8) - (fwd.live_executed ?? 0)}</b> 期才到 ${fwd.need || 8} 期门槛。在此之前，跑赢或跑输都不构成证据——这是「小样本当规律」的典型陷阱。</div>`
+            : ""}
+        </div>
+      </div>`;
+
     const rows = (d.periods || []).slice().reverse().map((r) => {
       const holds = (r.holdings || []).map((h) =>
         `<span class="thold"><b>${pct(h.weight, 1)}</b> ${esc(h.name)}</span>`).join("");
@@ -1043,6 +1078,7 @@
     const overlap = Math.abs(diff) < 5e-5;
     view.innerHTML = `
       ${kpi}
+      ${fwdCard}
       <div class="card reveal">
         <div class="card-head"><div>
           <div class="card-title">${overlap ? "纸上净值" : "纸上净值 vs 同期回测"}</div>

@@ -27,7 +27,7 @@ A 股 ETF 的量化轮动工具：260 只 ETF 横截面动量选 Top3（TGAR 策
 ```bash
 .venv/Scripts/python.exe -m etfquant doctor     # 数据截止日 + 绩效 + 口径（先看这个）
 .venv/Scripts/python.exe -m etfquant refresh    # 更新行情 → 回测 → 信号（= 界面按钮）
-.venv/Scripts/python.exe -m etfquant test       # 291 项单测
+.venv/Scripts/python.exe -m etfquant test       # 296 项单测
 ```
 
 Windows 双击 `打开界面.bat` 起 Web 控制台（`http://127.0.0.1:8800/`）。
@@ -44,7 +44,7 @@ Windows 双击 `打开界面.bat` 起 Web 控制台（`http://127.0.0.1:8800/`�
 | `scripts/research/` | 一次性实验（23 个），产物进 `output/experiments/` | 只在做对照实验时 |
 | `output/` | **产物契约**见 `output/README.md`；顶层是 app 依赖，`experiments/` 可删 | 服务/报告 |
 | `data/` | 行情缓存、标的池、归档信号、**净值库** | 全部 |
-| `tests/` | 291 项单测 | 自检 |
+| `tests/` | 296 项单测 | 自检 |
 | `docs/` | 完整档案、架构、尽调清单、自查、一页总结 | 人 + Agent |
 
 ## 4. 硬约束（改代码前必读）
@@ -54,7 +54,7 @@ Windows 双击 `打开界面.bat` 起 Web 控制台（`http://127.0.0.1:8800/`�
 3. **口径只有一个来源**：对外一律 **11%~13%**，17.21% 只能称"样本内"。换算在 `etfquant/expectation.py`，
    数据在 `output/overfit_summary.json`。**禁止在任何地方手写这两个数字。**
 4. **结构类信号必须在线计算**（`etfquant/chan.py::online_states`）。全样本端点回放会虚增约 8 倍 CAGR。
-5. **改动后必跑**：`test`（291）+ `audit`（32）；改了 `strategy.py` 还要 `verify-engine`（手机端对拍）。
+5. **改动后必跑**：`test`（296）+ `audit`（32）；改了 `strategy.py` 还要 `verify-engine`（手机端对拍）。
 6. **不要在这个仓库里调参**：7.5 的 PBO 43.2% 已判定样本内搜索期望收益为负。只能靠前向。
 7. **依赖方向单向**：生产模块不得 import 研究模块；`etfquant` 不得 import `server`。
    新模块要登记 `docs/architecture.md` §1.5，否则 audit 的 L 节 FAIL。
@@ -92,6 +92,7 @@ Windows 双击 `打开界面.bat` 起 Web 控制台（`http://127.0.0.1:8800/`�
 | 加因子 | `etfquant/factors.py` + `strategy.py::FactorBank`，A/B 用 `scripts/research/` 模板 |
 | 加策略 | `etfquant/strategy.py`（继承 `RotationBase`）+ `scripts/run_backtest.py` 注册 |
 | 改界面 | `web/app.js`（桌面）/ `mobile/.../app.js`（手机，改完要对拍） |
+| 前向验证 | `etfquant/track.py::signal_fidelity`（live 归档 vs 回测同日目标）+ `build_track` 的 `forward` 段；改结构要同时抬 `TRACK_SCHEMA` |
 | 改 K 线弹窗 | 后端 `/api/kline`（server.py::api_kline）；前端 `drawKline`；买卖点来自 `output/trades_*.csv`，**不要用日频权重 diff** |
 | 加外部策略对照 | 先查 `docs/github_strategies.md` 是否已测过，再读 `docs/strategy_dd.md` 五道闸门 |
 | 扩样本 / 加老标的 | 传 `refresh=True` 重下；新池另存 `data/etf_pool_*.csv`，**别改 `etf_pool.csv`** |
@@ -117,7 +118,7 @@ Windows 双击 `打开界面.bat` 起 Web 控制台（`http://127.0.0.1:8800/`�
 - 数据截止：`python -m etfquant doctor`；
 - 归档：20 期（1 期真实 live + 19 期回填），纸上净值与同期回测偏差 0.00pp；
 - **试验登记 73 次**（`data/trials.json`），DSR 保守口径 7.5%；
-- **291 项单测、32 项审计**全过；
+- **296 项单测、32 项审计**全过；
 - **实验记录 7.1–7.27**，全部结论见 `docs/README_full.md` 第七章。近期关键：
   - 7.23 执行三约束：开盘成交→17.0%，**收盘成交→3.9%**；容量 100–500 万；0.30%/边失效
   - 7.24 信号衰减：IC 0.017–0.022，**20 日归零、40 日转负**

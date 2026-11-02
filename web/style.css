@@ -1900,3 +1900,14 @@ html[data-theme="light"] .kpanel {
               0 0 0 1px rgba(16, 24, 40, 0.04);
 }
 html[data-theme="light"] .kpanel__legend { color: var(--txt-3); }
+
+/* 前向验证卡片的三项摘要 */
+.fwd-stats {
+  display: flex;
+  gap: 30px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.fwd-stats > div { display: flex; flex-direction: column; gap: 4px; }
+.fwd-stats span { font-size: 11.5px; color: var(--txt-3); letter-spacing: 0.02em; }
+.fwd-stats b { font-size: 13.5px; font-weight: 620; }
