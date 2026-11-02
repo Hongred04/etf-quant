@@ -485,9 +485,19 @@
       </div>`;
     }
 
-    // 回撤图的"当前"读数：曲线降采样过，但末点一定是最后一日，可以直接标
+    // 当前回撤必须用**全量**净值算：drawdown 序列是降采样的，cummax 会漏掉
+    // 被跳过的峰值，导致回撤被低估（实测差 7pp：-13.8% vs 真实的 -21.0%）。
+    const uw = d.underwater && d.underwater.self;
     const ddSeries = (d.drawdown && d.drawdown.self) || [];
-    const ddNow = ddSeries.length ? ddSeries[ddSeries.length - 1][1] / 100 : null;
+    const ddNow = uw ? uw.current_dd : (ddSeries.length ? ddSeries[ddSeries.length - 1][1] / 100 : null);
+    // 水下时长：跌多深之外的第二维。回撤 20% 拖三年，比回撤 30% 六个月恢复更难受。
+    const uwNow = uw && uw.current_days > 0
+      ? `水下 ${uw.current_days} 天 · 需涨 ${pct(uw.recovery_gain, 1)}`
+      : (uw ? "正处于新高" : "");
+    const uwMax = uw && uw.max_days > 0
+      ? `最长水下 ${(uw.max_days / 365.25).toFixed(1)} 年（${uw.max_start.slice(0, 7)}`
+        + `${uw.max_end ? " → " + uw.max_end.slice(0, 7) : " 至今"}）`
+      : "";
 
     view.innerHTML = `
       ${strip}
@@ -533,9 +543,10 @@
         <div class="card reveal">
           <div class="card-head">
             <div><div class="card-title">回撤曲线</div>
-            <div class="card-sub">红色本策略 · 虚线沪深300</div></div>
+            <div class="card-sub">红色本策略 · 虚线沪深300${uwMax ? " · " + uwMax : ""}</div></div>
             ${ddNow == null ? "" : `<div class="dd-now">
-              <b>${pct(ddNow, 1)}</b><span>当前回撤</span></div>`}
+              <b>${pct(ddNow, 1)}</b><span>当前回撤</span>
+              ${uwNow ? `<em>${uwNow}</em>` : ""}</div>`}
           </div>
           <div class="card-body"><div class="chart-wrap" style="height:196px">
             <canvas id="ddChart"></canvas></div></div>

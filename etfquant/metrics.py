@@ -119,6 +119,66 @@ def calmar(nav: pd.Series) -> float:
     return cagr(nav) / abs(mdd)
 
 
+def underwater_stats(nav: pd.Series) -> dict:
+    """水下时间统计：多久没回本，而不只是跌多深。
+
+    与 ``max_drawdown`` 互补，不能互相替代——回撤 20% 持续三年，
+    比回撤 30% 六个月恢复更难受，但 MDD 看不出来这件事。
+    外部经验值（趋势跟踪类）：平均恢复 8 个月、最长约 50 个月；
+    标普 500 买入持有：平均 14 个月、最长 90 个月。
+
+    返回字段
+    --------
+    max_days      : 最长一次水下持续的自然日天数（峰→恢复；未恢复算到最后一日）
+    max_start     : 该次水下的起始峰值日
+    max_end       : 恢复日；未恢复为空串
+    max_drawdown  : 该次水下的最大回撤深度
+    episodes      : 水下段数（每次跌破前高算一段）
+    current_days  : 当前已连续水下天数（0 = 正处于新高）
+    current_dd    : 当前相对前高的回撤（0 = 新高）
+    recovery_gain : 回到前高还需要涨多少（0 = 已在新高）
+    """
+    out = {"max_days": 0, "max_start": "", "max_end": "", "max_drawdown": 0.0,
+           "episodes": 0, "current_days": 0, "current_dd": 0.0, "recovery_gain": 0.0}
+    if nav is None or len(nav) < 2:
+        return out
+
+    nav = nav.dropna()
+    peak = nav.cummax()
+    dd = nav / peak - 1.0
+    under = dd < -1e-9
+
+    episodes: list[tuple[int, pd.Timestamp, pd.Timestamp | None, float]] = []
+    grp = (under != under.shift()).cumsum()
+    for _, idx in under[under].groupby(grp[under]).groups.items():
+        i0 = nav.index.get_loc(idx[0])
+        i1 = nav.index.get_loc(idx[-1])
+        # 峰值日 = 跌破前高的前一个交易日（序列开头就在水下的，从首日起算）
+        start = nav.index[max(0, i0 - 1)]
+        end = nav.index[i1 + 1] if i1 + 1 < len(nav) else None
+        span_end = end if end is not None else nav.index[-1]
+        episodes.append((int((span_end - start).days), start, end, float(dd.loc[idx].min())))
+
+    out["episodes"] = len(episodes)
+    if episodes:
+        days, start, end, deepest = max(episodes, key=lambda e: e[0])
+        out.update({"max_days": days, "max_start": str(start.date()),
+                    "max_end": str(end.date()) if end is not None else "",
+                    "max_drawdown": deepest})
+
+    if bool(under.iloc[-1]):
+        last_peak = peak.iloc[-1]
+        i_last = len(nav) - 1
+        i0 = i_last
+        while i0 > 0 and bool(under.iloc[i0 - 1]):
+            i0 -= 1
+        start = nav.index[max(0, i0 - 1)]
+        out["current_days"] = int((nav.index[-1] - start).days)
+        out["current_dd"] = float(dd.iloc[-1])
+        out["recovery_gain"] = float(last_peak / nav.iloc[-1] - 1.0)
+    return out
+
+
 def win_rate(nav: pd.Series, freq: str = "D") -> float:
     r = to_returns(nav)
     if r.empty:

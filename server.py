@@ -418,6 +418,12 @@ def api_overview() -> dict:
         "annual": annuals,
         "perf": perf_rows,
         "expect": expect,
+        # 水下时长：回答"多久没回本"，与 drawdown（跌多深）互补。
+        # 回撤 20% 拖三年比回撤 30% 六个月恢复更难受，但 MDD 看不出这件事。
+        "underwater": {
+            "self": M.underwater_stats(nav_self),
+            "bench": M.underwater_stats(nav_bench) if nav_bench is not None else None,
+        },
     }
 
 

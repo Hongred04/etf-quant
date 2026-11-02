@@ -112,6 +112,42 @@ def test_max_drawdown() -> None:
     assert metrics.max_drawdown(nav) == pytest.approx(0.6 / 1.2 - 1)
 
 
+def test_underwater_stats_basic() -> None:
+    """水下时长与「跌多深」是两个维度，必须分别正确。"""
+    idx = pd.bdate_range("2022-01-03", periods=6)
+    # 1.0 → 1.2（峰）→ 0.9 → 1.2（恢复）→ 1.5（新高）
+    nav = pd.Series([1.0, 1.2, 0.9, 1.2, 1.5, 1.55], index=idx)
+    u = metrics.underwater_stats(nav)
+    assert u["episodes"] == 1
+    assert u["max_start"] == str(idx[1].date()), "起点应是峰值日，不是跌破那天"
+    assert u["max_end"] == str(idx[3].date()), "终点应是回到前高那天"
+    assert u["max_days"] == (idx[3] - idx[1]).days
+    assert u["max_drawdown"] == pytest.approx(0.9 / 1.2 - 1)
+    # 末日在 1.55 > 前高 1.5，不在水下
+    assert u["current_days"] == 0
+    assert u["current_dd"] == pytest.approx(0.0)
+    assert u["recovery_gain"] == pytest.approx(0.0)
+
+
+def test_underwater_stats_still_under() -> None:
+    """仍未恢复时：max_end 为空串，current_* 要如实反映当前状态。"""
+    idx = pd.bdate_range("2022-01-03", periods=4)
+    nav = pd.Series([1.0, 2.0, 1.0, 1.5], index=idx)   # 峰值 2.0，末值 1.5，未恢复
+    u = metrics.underwater_stats(nav)
+    assert u["max_end"] == ""
+    assert u["max_days"] == (idx[3] - idx[1]).days
+    assert u["current_days"] == (idx[3] - idx[1]).days
+    assert u["current_dd"] == pytest.approx(1.5 / 2.0 - 1)
+    assert u["recovery_gain"] == pytest.approx(2.0 / 1.5 - 1)
+
+
+def test_underwater_stats_empty_and_monotone() -> None:
+    assert metrics.underwater_stats(pd.Series(dtype=float))["max_days"] == 0
+    idx = pd.bdate_range("2022-01-03", periods=3)
+    u = metrics.underwater_stats(pd.Series([1.0, 1.1, 1.2], index=idx))
+    assert u["episodes"] == 0 and u["max_days"] == 0 and u["current_days"] == 0
+
+
 def test_zscore_cs_shape(px: pd.DataFrame) -> None:
     z = F.zscore_cs(px)
     row = z.dropna().iloc[-1]

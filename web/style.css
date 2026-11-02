@@ -573,6 +573,13 @@ html, body {
   letter-spacing: -0.02em;
 }
 .dd-now span { font-size: 10px; color: var(--txt-3); }
+.dd-now em {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--txt-2);
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
 
 /* 高亮行 */
 .row-hl td { background: rgba(233, 185, 73, 0.055); }
