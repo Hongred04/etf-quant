@@ -1059,7 +1059,7 @@
             : SIG.status === "pending" ? "待执行"
             : (SIG.held_days != null ? "已持有 " + SIG.held_days + " 个交易日" : "已执行")) + '</i></div>' +
         '<i class="sched__line"></i>' +
-        '<div class="sched__step ' + ((SIG.status === "due" || SIG.status === "today") ? "is-due" : "is-next") + '"><span>下次换仓</span><b>' + esc(SIG.next_reb || "—") + '</b><i>' +
+        '<div class="sched__step ' + ((SIG.status === "due" || SIG.status === "today") ? "is-due" : "is-next") + '"><span>下次换仓</span><b>' + esc(SIG.next_reb || "—") + (SIG.next_est ? '<em>估算</em>' : '') + '</b><i>' +
           (SIG.status === "today" ? "就是今天"
             : SIG.status === "due" ? "已过期，请重算"
             : (SIG.days_to_next != null ? "还有 " + SIG.days_to_next + " 个交易日" : "—")) + '</i></div>' +

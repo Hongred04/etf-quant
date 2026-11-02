@@ -997,6 +997,7 @@ table.tbl tr.is-hl td { background: var(--accent-soft); }
 .sched__step { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
 .sched__step span { font-size: 10px; color: var(--txt-3); letter-spacing: 0.03em; }
 .sched__step b { font-size: 13px; font-weight: 600; color: var(--txt-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sched__step b em { font-style: normal; font-size: 10px; font-weight: 500; margin-left: 4px; padding: 1px 4px; border-radius: 3px; background: color-mix(in oklab, var(--txt-3) 22%, transparent); color: var(--txt-3); vertical-align: 1px; }
 .sched__step i { font-size: 10px; font-style: normal; color: var(--txt-3); }
 .sched__step.is-done b { color: var(--txt); }
 .sched__step.is-next span, .sched__step.is-next b { color: var(--accent); }
