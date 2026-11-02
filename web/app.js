@@ -906,8 +906,8 @@
         return `<tr${short ? ' class="row-warn"' : ""}>
           <td class="dim">${i + 1}</td>
           <td style="text-align:left">
-            <span class="strong">${esc(r.name)}</span>
-            <span class="mono dim" style="margin-left:6px">${esc(r.code)}</span>
+            <span class="strong kopen" data-kcode="${esc(r.code)}">${esc(r.name)}</span>
+            <span class="mono dim">${esc(r.code)}</span>
           </td>
           <td><span class="tag c-${esc(r.category)}">${esc(r.category)}</span></td>
           <td>${(w * 100).toFixed(1)}%</td>
@@ -1217,7 +1217,7 @@
         const live = r.live ? `<span class="live-dot" title="盘中实时价"></span>` : "";
         return `<tr>
           <td class="cell-name">
-            <div class="nm">${esc(r.name)}</div>
+            <div class="nm kopen" data-kcode="${esc(r.code)}">${esc(r.name)}</div>
             <div class="sub"><span class="mono">${esc(r.code)}</span>${live}
               ${r.buy_date ? `<span>${esc(r.buy_date)} 买入</span>` : ""}
               ${r.note ? `<span>· ${esc(r.note)}</span>` : ""}</div>
@@ -1265,7 +1265,7 @@
         const ACT_TEXT = { add: "加仓", cut: "减仓", exit: "清仓" };
         const actCls = { add: "up", cut: "down", exit: "down" };
         const arows = acts.map((p) => `<tr>
-          <td class="cell-name"><div class="nm">${esc(p.name)}</div>
+          <td class="cell-name"><div class="nm kopen" data-kcode="${esc(p.code)}">${esc(p.name)}</div>
             <div class="sub"><span class="mono">${esc(p.code)}</span></div></td>
           <td class="num">${pct(p.target_weight, 1)}</td>
           <td class="num">${pct(p.actual_weight, 1)}</td>
@@ -1433,7 +1433,7 @@
     const holdHtml = d.current.map((r) => `
       <div class="hold-card">
         <div>
-          <div class="hold-name">${esc(r.name)}</div>
+          <div class="hold-name kopen" data-kcode="${esc(r.code)}">${esc(r.name)}</div>
           <div class="hold-sub">
             <span class="mono">${esc(r.code)}</span>
             <span class="tag c-${esc(r.category)}">${esc(r.category)}</span>
@@ -1960,7 +1960,7 @@
       <div class="mt">
         ${tableCard("成交额最大的 30 只", "成交越活跃，买卖时越不容易冲击价格，也更适合较大资金",
           [
-            { key: "code", label: "代码", fmt: (v) => `<span class="mono">${esc(v)}</span>` },
+            { key: "code", label: "代码", fmt: (v) => `<span class="mono kopen" data-kcode="${esc(v)}">${esc(v)}</span>` },
             { key: "name", label: "名称", fmt: (v) => `<span class="strong">${esc(v)}</span>` },
             { key: "category", label: "类别", fmt: (v) => `<span class="tag c-${esc(v)}">${esc(v)}</span>` },
             { key: "price", label: "最新价", fmt: (v) => num(v, 3) },
@@ -2389,6 +2389,460 @@
     } catch (e) { /* noop */ }
   }
 
+  /* ------------------------------------------------------- K 线弹窗 */
+  /* 只读本地缓存的日线（前复权）。B/S 来自 output/trades_s4_tgar_main.csv
+     的建仓/清仓记录——不是日频权重 diff，那个口径会把价格漂移也当成交易。 */
+  const KL = { code: "", rows: [], trades: [], bars: 250, hover: -1, geom: null, cache: {} };
+
+  function cssv(name, fb) {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return v || fb;
+  }
+
+  function roundRect(ctx, x, y, w, h, r) {
+    const rr = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + rr, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rr);
+    ctx.arcTo(x + w, y + h, x, y + h, rr);
+    ctx.arcTo(x, y + h, x, y, rr);
+    ctx.arcTo(x, y, x + w, y, rr);
+    ctx.closePath();
+  }
+
+  function kMovingAvg(rows, n) {
+    const out = new Array(rows.length).fill(null);
+    let sum = 0;
+    for (let i = 0; i < rows.length; i++) {
+      sum += rows[i][4];
+      if (i >= n) sum -= rows[i - n][4];
+      if (i >= n - 1) out[i] = sum / n;
+    }
+    return out;
+  }
+
+  function drawKline() {
+    const canvas = $("#kCanvas");
+    if (!canvas || !KL.rows.length) return;
+    const rows = KL.rows;
+    const H = Math.max(320, Math.min(500, Math.round(window.innerHeight * 0.58)));
+    const { ctx, w, h } = setupCanvas(canvas, H);
+
+    const C = {
+      up: cssv("--up", "#f6465d"), down: cssv("--down", "#2ebd85"),
+      txt: cssv("--txt", "#e8ecf4"), txt2: cssv("--txt-2", "#98a3b8"),
+      txt3: cssv("--txt-3", "#616b7f"), line: cssv("--line", "#1b202b"),
+      panel: cssv("--panel-2", "#12151d"), accent: cssv("--accent", "#6d8cff"),
+      gold: cssv("--gold", "#e9b949"), violet: cssv("--violet", "#a78bfa"),
+      border: cssv("--line-2", "rgba(255,255,255,0.08)"),
+    };
+    const PAD = { l: 12, r: 66, t: 18, b: 24 };
+    const GAP = 18;
+    const volH = Math.max(60, Math.round((h - PAD.t - PAD.b) * 0.26));
+    const priceH = h - PAD.t - PAD.b - volH - GAP;
+    const plotW = w - PAD.l - PAD.r;
+    const n = rows.length;
+    const step = plotW / n;
+    const bw = Math.max(1.2, Math.min(11, step * 0.68));
+    const xAt = (i) => PAD.l + step * (i + 0.5);
+    KL.geom = { PAD, step, n, volH, priceH, GAP, w, h };
+
+    const ma5 = kMovingAvg(rows, 5);
+    const ma20 = kMovingAvg(rows, 20);
+    const ma60 = kMovingAvg(rows, 60);
+
+    let lo = Infinity, hi = -Infinity;
+    rows.forEach((r) => { lo = Math.min(lo, r[3]); hi = Math.max(hi, r[2]); });
+    [ma5, ma20, ma60].forEach((arr) => arr.forEach((v) => {
+      if (v != null) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+    }));
+    const padY = (hi - lo) * 0.08 || 0.01;
+    lo -= padY; hi += padY;
+    const yAt = (v) => PAD.t + ((hi - v) / (hi - lo)) * priceH;
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.font = "11px 'Segoe UI', system-ui, sans-serif";
+    ctx.textBaseline = "middle";
+
+    /* 横向网格 + 右侧价格刻度 */
+    const ticks = niceTicks(lo, hi, 4);
+    ticks.forEach((v) => {
+      const y = yAt(v);
+      if (y < PAD.t - 1 || y > PAD.t + priceH + 1) return;
+      ctx.strokeStyle = C.line;
+      ctx.globalAlpha = 0.55;
+      ctx.beginPath();
+      ctx.moveTo(PAD.l, y);
+      ctx.lineTo(w - PAD.r + 6, y);
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = C.txt3;
+      ctx.textAlign = "left";
+      ctx.fillText(v.toFixed(3), w - PAD.r + 10, y);
+    });
+
+    /* 日期刻度 + 纵向网格（先画线，再写字） */
+    const labelCount = Math.min(5, n);
+    const dateMarks = [];
+    for (let k = 0; k < labelCount; k++) {
+      const i = Math.round((n - 1) * (k / (labelCount - 1 || 1)));
+      if (rows[i]) dateMarks.push({ i, text: rows[i][0].slice(5) });
+    }
+    dateMarks.forEach((m) => {
+      const x = xAt(m.i);
+      ctx.strokeStyle = C.line;
+      ctx.globalAlpha = 0.28;
+      ctx.beginPath();
+      ctx.moveTo(x, PAD.t);
+      ctx.lineTo(x, h - PAD.b);
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    });
+    ctx.textAlign = "center";
+    ctx.fillStyle = C.txt3;
+    dateMarks.forEach((m) => {
+      const x = Math.min(Math.max(xAt(m.i), 26), w - PAD.r - 18);
+      ctx.fillText(m.text, x, h - PAD.b / 2 - 1);
+    });
+
+    /* 成交量 */
+    const vTop = PAD.t + priceH + GAP;
+    const vols = rows.map((r) => r[5]);
+    const vmax = Math.max(...vols) || 1;
+    const vAvg = kMovingAvg(rows.map((r) => [0, 0, 0, 0, r[5], r[5]]), 20);
+    ctx.strokeStyle = C.line;
+    ctx.globalAlpha = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(PAD.l, vTop - 6);
+    ctx.lineTo(w - PAD.r + 6, vTop - 6);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    /* K 线与成交量柱 */
+    rows.forEach((r, i) => {
+      const up = r[4] >= r[1];
+      const color = up ? C.up : C.down;
+      const x = xAt(i);
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 0.92;
+      ctx.beginPath();
+      ctx.moveTo(x, yAt(r[2]));
+      ctx.lineTo(x, yAt(r[3]));
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      const yO = yAt(r[1]);
+      const yC = yAt(r[4]);
+      const top = Math.min(yO, yC);
+      const bodyH = Math.max(1, Math.abs(yC - yO));
+      ctx.fillRect(x - bw / 2, top, bw, bodyH);
+
+      const yv = vTop + volH - (r[5] / vmax) * volH * 0.9;
+      ctx.globalAlpha = 0.5;
+      ctx.fillRect(x - bw / 2, yv, bw, Math.max(1, vTop + volH - yv));
+      ctx.globalAlpha = 1;
+    });
+
+    /* 20 日均量线：判断"这根量是不是异常"比单看柱子直观 */
+    ctx.strokeStyle = C.txt3;
+    ctx.globalAlpha = 0.85;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    let vs = false;
+    vAvg.forEach((v, i) => {
+      if (v == null) return;
+      const x = xAt(i);
+      const y = vTop + volH - (v / vmax) * volH * 0.9;
+      if (!vs) { ctx.moveTo(x, y); vs = true; } else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = C.txt3;
+    ctx.textAlign = "left";
+    ctx.font = "10px 'Segoe UI', system-ui, sans-serif";
+    ctx.fillText("成交量 · 20日均量", PAD.l + 2, vTop - 10);
+    ctx.font = "11px 'Segoe UI', system-ui, sans-serif";
+
+    /* 均线 */
+    const drawMa = (arr, color, width) => {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.globalAlpha = 0.95;
+      ctx.beginPath();
+      let started = false;
+      arr.forEach((v, i) => {
+        if (v == null) { started = false; return; }
+        const x = xAt(i), y = yAt(v);
+        if (!started) { ctx.moveTo(x, y); started = true; }
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    };
+    drawMa(ma60, C.accent, 1.4);
+    drawMa(ma20, C.violet, 1.3);
+    drawMa(ma5, C.gold, 1.2);
+
+    /* 买点 / 卖点：贴边旗标 + 竖向虚线。
+       不把标签放在蜡烛旁边——相邻两次调仓会把标签叠成一团，
+       而且永远会遮住某根 K 线。卖点贴顶、买点贴底，语义也更清楚。 */
+    const idxOf = {};
+    rows.forEach((r, i) => { idxOf[r[0]] = i; });
+    const placed = [];
+    KL.trades.forEach((t) => {
+      const i = idxOf[t[0]];
+      if (i == null) return;
+      const buy = t[1] === "B";
+      const text = buy ? "买" : "卖";
+      const x = xAt(i);
+
+      ctx.strokeStyle = buy ? C.up : C.down;
+      ctx.globalAlpha = 0.3;
+      ctx.setLineDash([2, 3]);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, PAD.t);
+      ctx.lineTo(x, PAD.t + priceH);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+
+      ctx.font = "9.5px 'Segoe UI', system-ui, sans-serif";
+      const tw2 = ctx.measureText(text).width + 10;
+      const pillH = 14;
+      let py = buy ? PAD.t + priceH - pillH - 2 : PAD.t + 2;
+      // 同一侧水平过近就错开一层
+      for (let guard = 0; guard < 3; guard++) {
+        const clash = placed.some((q) => q.buy === buy
+          && Math.abs(q.x - x) < tw2 + 5 && Math.abs(q.y - py) < pillH + 2);
+        if (!clash) break;
+        py += buy ? -pillH - 3 : pillH + 3;
+      }
+      py = Math.max(PAD.t, Math.min(py, PAD.t + priceH - pillH));
+      const px = Math.max(PAD.l, Math.min(x - tw2 / 2, w - PAD.r - tw2));
+      placed.push({ x, y: py, buy });
+
+      ctx.fillStyle = buy ? C.up : C.down;
+      ctx.globalAlpha = 0.95;
+      roundRect(ctx, px, py, tw2, pillH, 3);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = "#fff";
+      ctx.textAlign = "center";
+      ctx.fillText(text, px + tw2 / 2, py + pillH / 2 + 0.5);
+      ctx.font = "11px 'Segoe UI', system-ui, sans-serif";
+    });
+
+    /* 底部轴线 */
+    ctx.strokeStyle = C.line;
+    ctx.globalAlpha = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(PAD.l, h - PAD.b);
+    ctx.lineTo(w - PAD.r + 6, h - PAD.b);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    /* 最新价虚线与标签 */
+    const last = rows[n - 1];
+    const lastY = yAt(last[4]);
+    ctx.setLineDash([3, 4]);
+    ctx.strokeStyle = C.txt3;
+    ctx.globalAlpha = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(PAD.l, lastY);
+    ctx.lineTo(w - PAD.r + 6, lastY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+    const tag = last[4].toFixed(3);
+    ctx.fillStyle = last[4] >= last[1] ? C.up : C.down;
+    ctx.font = "10.5px 'Segoe UI', system-ui, sans-serif";
+    const tw = ctx.measureText(tag).width + 10;
+    roundRect(ctx, w - PAD.r + 8, lastY - 8, tw, 16, 4);
+    ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.textAlign = "center";
+    ctx.fillText(tag, w - PAD.r + 8 + tw / 2, lastY);
+
+    /* 悬停十字线 + 信息框 */
+    if (KL.hover >= 0 && KL.hover < n) {
+      const i = KL.hover;
+      const r = rows[i];
+      const x = xAt(i);
+      ctx.strokeStyle = C.txt3;
+      ctx.globalAlpha = 0.65;
+      ctx.setLineDash([2, 3]);
+      ctx.beginPath();
+      ctx.moveTo(x, PAD.t);
+      ctx.lineTo(x, h - PAD.b);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+
+      const chg = i > 0 ? (r[4] / rows[i - 1][4] - 1) * 100 : 0;
+      const lines = [
+        [r[0], C.txt2],
+        [`开 ${r[1].toFixed(3)}   高 ${r[2].toFixed(3)}`, C.txt],
+        [`低 ${r[3].toFixed(3)}   收 ${r[4].toFixed(3)}`, C.txt],
+        [`涨跌 ${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%   量 ${(r[5] / 1e4).toFixed(1)} 万手`, chg >= 0 ? C.up : C.down],
+      ];
+      const tradeAt = KL.trades.find((t) => t[0] === r[0]);
+      if (tradeAt) lines.push([tradeAt[1] === "B" ? "策略买入" : "策略卖出", tradeAt[1] === "B" ? C.up : C.down]);
+
+      ctx.font = "11px 'Segoe UI', system-ui, sans-serif";
+      const bwBox = Math.max(...lines.map((l) => ctx.measureText(l[0]).width)) + 20;
+      const bhBox = lines.length * 17 + 12;
+      const bx = Math.min(PAD.l + 10, w - PAD.r - bwBox - 8);
+      const by = PAD.t + 4;
+      ctx.fillStyle = C.panel;
+      ctx.globalAlpha = 0.94;
+      roundRect(ctx, bx, by, bwBox, bhBox, 8);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = C.border;
+      ctx.lineWidth = 1;
+      roundRect(ctx, bx, by, bwBox, bhBox, 8);
+      ctx.stroke();
+      ctx.textAlign = "left";
+      lines.forEach((l, k) => {
+        ctx.fillStyle = l[1];
+        ctx.fillText(l[0], bx + 10, by + 15 + k * 17);
+      });
+    }
+  }
+
+  function renderKlineHeader(d) {
+    const last = d.rows[d.rows.length - 1];
+    const prev = d.prev_close != null ? d.prev_close : (d.rows[d.rows.length - 2] || last)[4];
+    const chg = (last[4] / prev - 1) * 100;
+    $("#kTitle").textContent = d.name || d.code;
+    $("#kCode").textContent = d.code;
+    const cat = $("#kCat");
+    cat.textContent = d.category || "";
+    cat.className = "tag" + (d.category ? " c-" + d.category : "");
+    cat.hidden = !d.category;
+    const lastEl = $("#kLast");
+    lastEl.textContent = last[4].toFixed(3);
+    lastEl.className = "kpanel__last " + (chg >= 0 ? "up" : "down");
+    const chgEl = $("#kChg");
+    chgEl.textContent = `${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%`;
+    chgEl.className = "kpanel__chg " + (chg >= 0 ? "up" : "down");
+
+    const rows = d.rows;
+    const m = (n) => {
+      if (rows.length < n) return "—";
+      let s = 0;
+      for (let i = rows.length - n; i < rows.length; i++) s += rows[i][4];
+      return (s / n).toFixed(3);
+    };
+    $("#kLegend").innerHTML = `
+      <span><i style="background:var(--gold)"></i>MA5 ${m(5)}</span>
+      <span><i style="background:var(--violet)"></i>MA20 ${m(20)}</span>
+      <span><i style="background:var(--accent)"></i>MA60 ${m(60)}</span>
+      <span style="margin-left:auto">前复权 · 日线</span>`;
+    const nBuy = d.trades.filter((t) => t[1] === "B").length;
+    const nSell = d.trades.filter((t) => t[1] === "S").length;
+    const first = rows[0][4];
+    const span = (last[4] / first - 1) * 100;
+    const spanCls = span >= 0 ? "up" : "down";
+    $("#kFoot").innerHTML = `
+      <span>数据到 <b>${d.data_date}</b></span>
+      <span>区间涨跌 <b class="${spanCls}">${span >= 0 ? "+" : ""}${span.toFixed(1)}%</b></span>
+      <span>策略建仓 <b class="up">${nBuy}</b> · 清仓 <b class="down">${nSell}</b></span>
+      <span>买卖为调仓信号日，次日开盘成交</span>`;
+  }
+
+  async function openKline(code) {
+    if (!code) return;
+    KL.code = code;
+    const modal = $("#klineModal");
+    modal.hidden = false;
+    document.body.style.overflow = "hidden";
+    $("#kTitle").textContent = "载入中…";
+    $("#kCode").textContent = code;
+    $("#kCat").hidden = true;
+    $("#kLast").textContent = "—";
+    $("#kChg").textContent = "";
+    $("#kLegend").innerHTML = "";
+    $("#kFoot").innerHTML = "";
+
+    const key = code + ":" + KL.bars;
+    let d = KL.cache[key];
+    if (!d) {
+      try {
+        d = await api(`/api/kline?code=${encodeURIComponent(code)}&bars=${KL.bars}`);
+      } catch (e) {
+        toast("K 线加载失败：" + e.message, "err");
+        closeKline();
+        return;
+      }
+      if (!d || d.error) {
+        toast((d && d.error) || "没有这只标的的行情", "err");
+        closeKline();
+        return;
+      }
+      KL.cache[key] = d;
+    }
+    if (KL.code !== code) return;      // 用户已切到别的标的
+    KL.rows = d.rows;
+    KL.trades = d.trades || [];
+    KL.hover = -1;
+    renderKlineHeader(d);
+    drawKline();
+  }
+
+  function closeKline() {
+    $("#klineModal").hidden = true;
+    document.body.style.overflow = "";
+    KL.hover = -1;
+  }
+
+  $("#kRanges").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-bars]");
+    if (!b) return;
+    $$("#kRanges button").forEach((x) => x.classList.toggle("is-on", x === b));
+    KL.bars = parseInt(b.dataset.bars, 10) || 250;
+    if (KL.code) openKline(KL.code);
+  });
+
+  $("#klineModal")?.addEventListener("click", (e) => {
+    if (e.target.closest("[data-kclose]")) closeKline();
+  });
+
+  $("#kCanvas")?.addEventListener("mousemove", (e) => {
+    const g = KL.geom;
+    if (!g) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const i = Math.floor((x - g.PAD.l) / g.step);
+    const idx = Math.max(-1, Math.min(g.n - 1, i));
+    if (idx !== KL.hover) {
+      KL.hover = idx;
+      drawKline();
+    }
+  });
+  $("#kCanvas")?.addEventListener("mouseleave", () => {
+    if (KL.hover !== -1) { KL.hover = -1; drawKline(); }
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$("#klineModal").hidden) closeKline();
+  });
+  window.addEventListener("resize", () => {
+    if (!$("#klineModal").hidden) drawKline();
+  });
+
+  /* 任意带 data-kcode 的元素点击即开图（表格里的代码/名称） */
+  document.addEventListener("click", (e) => {
+    const hit = e.target.closest("[data-kcode]");
+    if (!hit) return;
+    e.preventDefault();
+    openKline(hit.dataset.kcode);
+  });
+
   /* ------------------------------------------------------- 事件绑定 */
   $("#nav").addEventListener("click", (e) => {
     const btn = e.target.closest(".nav-item");
@@ -2425,6 +2879,10 @@
     // 状态检查不能挡在首屏前面：/api/status 冷启动要打一次行情快照，
     // 最坏等 3 秒，用户看到的就是白屏。先渲染，状态回来后再补那行说明。
     await checkFreshness(true);
+
+    // 深链：?kline=sh516620 直接打开该标的的 K 线（分享/排查都方便）
+    const kp = new URLSearchParams(location.search).get("kline");
+    if (kp) openKline(kp);
 
     // 若后端正在跑任务，接管日志
     try {

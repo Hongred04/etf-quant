@@ -39,3 +39,6 @@ desktop.ini
 .workbuddy/
 # 实盘跟踪的落盘缓存（可重建，不进仓库）
 output/track_cache.json
+
+# 界面走查截图（本地验证用，不是交付物）
+ui_review/

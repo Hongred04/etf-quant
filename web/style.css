@@ -1718,3 +1718,185 @@ html[data-theme="light"] .ico-moon { display: none; }
 /* 过拟合体检的滚动表：11 行，行高压缩一点，避免把下面三张实验表挤到屏外 */
 .walk-table td { padding: 7px 10px; }
 .walk-table .cell-name .sub { margin-top: 2px; }
+
+/* ============================================================
+   K 线弹窗
+   点任意标的代码打开；只读本地缓存，不触发行情请求。
+   ============================================================ */
+.kmodal {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+.kmodal[hidden] { display: none !important; }
+
+.kmodal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(4, 6, 10, 0.62);
+  backdrop-filter: blur(6px);
+  animation: kFade 0.18s ease;
+}
+[data-theme="light"] .kmodal__backdrop { background: rgba(20, 26, 38, 0.28); }
+
+.kpanel {
+  position: relative;
+  width: min(1000px, 94vw);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  box-shadow: 0 40px 90px -30px rgba(0, 0, 0, 0.85),
+              0 0 0 1px rgba(255, 255, 255, 0.02) inset;
+  animation: kRise 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+  overflow: hidden;
+}
+@keyframes kFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes kRise {
+  from { opacity: 0; transform: translateY(14px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
+.kpanel__head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px 14px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.kpanel__id { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.kpanel__name { font-size: 16px; font-weight: 640; letter-spacing: -0.01em; }
+.kpanel__code { font-size: 12px; color: var(--txt-3); }
+.kpanel__quote { display: flex; align-items: baseline; gap: 8px; margin-left: 4px; }
+.kpanel__last {
+  font-size: 22px; font-weight: 660; letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.kpanel__chg { font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.kpanel__ranges {
+  margin-left: auto;
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border-radius: 9px;
+  background: var(--panel-3);
+  border: 1px solid var(--line);
+}
+.kpanel__ranges button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--txt-2);
+  font-size: 11.5px;
+  padding: 5px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.kpanel__ranges button:hover { color: var(--txt); }
+.kpanel__ranges button.is-on {
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px rgba(109, 140, 255, 0.28);
+}
+.kpanel__x {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: var(--panel-3);
+  color: var(--txt-2);
+  width: 28px; height: 28px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+.kpanel__x:hover { color: var(--txt); border-color: var(--line-2); }
+
+.kpanel__legend {
+  display: flex;
+  gap: 16px;
+  padding: 9px 18px 0;
+  font-size: 11.5px;
+  color: var(--txt-3);
+  font-variant-numeric: tabular-nums;
+}
+.kpanel__legend i {
+  display: inline-block;
+  width: 10px; height: 2px;
+  border-radius: 2px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.kpanel__chart { padding: 6px 10px 0; }
+.kpanel__chart canvas { display: block; width: 100%; }
+
+.kpanel__foot {
+  padding: 8px 18px 14px;
+  font-size: 11.5px;
+  color: var(--txt-3);
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--line);
+  margin-top: 6px;
+  padding-top: 10px;
+}
+.kpanel__foot b { color: var(--txt-2); font-weight: 560; }
+
+/* 可点击的标的代码：不改变排版，只给一点点交互暗示 */
+.kopen { cursor: pointer; transition: color 0.14s ease; }
+.kopen:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+
+@media (max-width: 720px) {
+  .kmodal { padding: 10px; }
+  /* 窄屏用 100% 而不是 94vw：vw 不含滚动条差，容易把面板挤出右边界，
+     连带把右上角的关闭按钮顶到屏幕外 */
+  .kpanel { width: 100%; max-width: 100%; max-height: 94vh; }
+  /* 四行结构：标题+关闭 / 价格 / 范围按钮 / 图表
+     之前把所有元素挤一行，关闭按钮会被推出面板右边缘 */
+  .kpanel__head { padding: 12px 14px 10px; gap: 8px 10px; }
+  .kpanel__last { font-size: 19px; }
+  .kpanel__id { order: 1; flex: 1 1 auto; min-width: 0; }
+  .kpanel__name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* 绝对定位比 flex 更可靠：无论标题多长都不会把关闭按钮挤出去 */
+  .kpanel { position: relative; }
+  .kpanel__x {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    order: 2;
+    flex: none;
+    z-index: 2;
+  }
+  .kpanel__id { padding-right: 38px; }
+  .kpanel__quote { order: 3; flex: 1 1 100%; margin-left: 0; }
+  /* 窄屏下范围按钮独占一行、等分宽度；用 flex-basis 而不是 width:100%，
+     否则容器会被撑出面板右边缘，"2年"被裁掉 */
+  .kpanel__ranges {
+    order: 4;
+    flex: 1 1 100%;
+    width: auto;
+    min-width: 0;
+    margin-left: 0;
+    justify-content: stretch;
+  }
+  .kpanel__ranges button { flex: 1 1 0; padding: 6px 0; }
+  .kpanel__legend { flex-wrap: wrap; gap: 6px 12px; padding: 8px 14px 0; }
+  .kpanel__legend > span:last-child { display: none; }
+  .kpanel__chart { padding: 4px 6px 0; }
+  .kpanel__foot { padding: 8px 14px 12px; gap: 6px 12px; }
+}
+
+/* 浅色主题下弹窗需要更轻的投影，否则像一块黑板压在纸面上 */
+html[data-theme="light"] .kpanel {
+  box-shadow: 0 28px 64px -26px rgba(16, 24, 40, 0.32),
+              0 0 0 1px rgba(16, 24, 40, 0.04);
+}
+html[data-theme="light"] .kpanel__legend { color: var(--txt-3); }

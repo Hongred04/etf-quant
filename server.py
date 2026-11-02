@@ -1232,6 +1232,77 @@ def api_track() -> dict:
         return res
 
 
+def api_kline(code: str, bars: int = 250) -> dict:
+    """单只 ETF 的日线（前复权），供前端 K 线弹窗使用。
+
+    只读本地缓存，不打网络：图表是"看形状"的工具，不该因为一次请求把
+    行情源打限流；缓存由「更新行情」负责推进。
+    """
+    code = (code or "").strip().lower()
+    if not re.fullmatch(r"(sh|sz)\d{6}", code):
+        return {"error": "代码格式应为 sh/sz + 6 位数字"}
+    bars = max(30, min(int(bars or 250), 1200))
+    fp = DATA / "cache" / "kline_qfq" / f"{code}.csv"
+    if not fp.exists():
+        return {"error": f"本地没有 {code} 的行情缓存"}
+    df = pd.read_csv(fp, parse_dates=["date"]).tail(bars)
+    if df.empty:
+        return {"error": "缓存为空"}
+    df = df.dropna(subset=["open", "high", "low", "close"])
+
+    name, cat = code, ""
+    pool = _csv(DATA / "etf_pool.csv", dtype=str)
+    if pool is not None and "ticker" in pool.columns:
+        hit = pool.loc[pool["ticker"] == code]
+        if not hit.empty:
+            name = str(hit.iloc[0]["name"])
+            cat = str(hit.iloc[0].get("category") or "")
+
+    rows = [
+        [d.strftime("%Y-%m-%d"), round(float(o), 4), round(float(h), 4),
+         round(float(lo), 4), round(float(c), 4), int(v)]
+        for d, o, h, lo, c, v in zip(df["date"], df["open"], df["high"],
+                                      df["low"], df["close"], df["volume"])
+    ]
+    prev = None
+    if len(rows) >= 2:
+        prev = rows[-2][4]
+    return {
+        "code": code, "name": name, "category": cat,
+        "rows": rows, "prev_close": prev,
+        "data_date": rows[-1][0] if rows else "",
+        "trades": _trade_marks(code),
+    }
+
+
+def _trade_marks(code: str) -> list[list[str]]:
+    """回测里的建仓/清仓点（只有 from=0→>0 与 >0→0，日常微调不标）。
+
+    口径来自 output/trades_*.csv 的调仓记录，而不是日频权重快照做 diff——
+    后者会因为价格漂移把每个持仓日都算成一次"交易"，事件数虚高约 5 倍
+    （这是 7.21 踩过的坑，这里必须沿用正确口径）。
+    日期是**信号日**：实际成交在次日开盘。
+    """
+    fp = OUT / "trades_s4_tgar_main.csv"
+    if not fp.exists():
+        return []
+    try:
+        df = pd.read_csv(fp, dtype={"code": str})
+    except (OSError, pd.errors.ParserError):
+        return []
+    if not {"date", "code", "w_from", "w_to"} <= set(df.columns):
+        return []
+    sub = df[df["code"] == code]
+    out: list[list[str]] = []
+    for _, r in sub.iterrows():
+        wf, wt = float(r["w_from"]), float(r["w_to"])
+        if wf <= 0 < wt:
+            out.append([str(r["date"])[:10], "B"])
+        elif wf > 0 >= wt:
+            out.append([str(r["date"])[:10], "S"])
+    return out
+
+
 def api_universe() -> dict:
     pool = _csv(DATA / "etf_pool.csv")
     if pool is None:
@@ -1696,6 +1767,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(_cached("research", 30, api_research))
             if path == "/api/universe":
                 return self._json(_cached("universe", 30, api_universe))
+            if path == "/api/kline":
+                code = (qs.get("code") or [""])[0]
+                bars = (qs.get("bars") or ["250"])[0]
+                try:
+                    n = int(bars)
+                except ValueError:
+                    n = 250
+                # 缓存 15 秒：翻看多只标的时避免重复读盘，又不会让新行情迟到太久
+                return self._json(_cached(f"kline:{code}:{n}", 15,
+                                          lambda: api_kline(code, n)))
             if path == "/api/portfolio":
                 return self._json(_cached("portfolio", 120, api_portfolio))
             if path == "/api/holdings":

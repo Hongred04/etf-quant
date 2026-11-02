@@ -89,6 +89,7 @@ Windows 双击 `打开界面.bat` 起 Web 控制台（`http://127.0.0.1:8800/`�
 | 加因子 | `etfquant/factors.py` + `strategy.py::FactorBank`，A/B 用 `scripts/research/` 模板 |
 | 加策略 | `etfquant/strategy.py`（继承 `RotationBase`）+ `scripts/run_backtest.py` 注册 |
 | 改界面 | `web/app.js`（桌面）/ `mobile/.../app.js`（手机，改完要对拍） |
+| 改 K 线弹窗 | 后端 `/api/kline`（server.py::api_kline）；前端 `drawKline`；买卖点来自 `output/trades_*.csv`，**不要用日频权重 diff** |
 | 加外部策略对照 | 先查 `docs/github_strategies.md` 是否已测过，再读 `docs/strategy_dd.md` 五道闸门 |
 | 扩样本 / 加老标的 | 传 `refresh=True` 重下；新池另存 `data/etf_pool_*.csv`，**别改 `etf_pool.csv`** |
 | 改数据源 | `etfquant/datafeed.py`（唯一出口）；新增入口须同厂商（复权因子一致）且登记 `KLINE_HOSTS` |

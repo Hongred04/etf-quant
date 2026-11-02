@@ -140,6 +140,34 @@
 <div class="term-tip" id="termTip" hidden></div>
 <div class="toast-wrap" id="toasts"></div>
 
+<!-- K 线弹窗：点任意标的代码打开，纯本地缓存数据，不发网络请求 -->
+<div class="kmodal" id="klineModal" hidden>
+  <div class="kmodal__backdrop" data-kclose></div>
+  <div class="kpanel" role="dialog" aria-modal="true" aria-labelledby="kTitle">
+    <div class="kpanel__head">
+      <div class="kpanel__id">
+        <span class="kpanel__name" id="kTitle">—</span>
+        <span class="kpanel__code mono" id="kCode"></span>
+        <span class="tag" id="kCat"></span>
+      </div>
+      <div class="kpanel__quote">
+        <span class="kpanel__last" id="kLast">—</span>
+        <span class="kpanel__chg" id="kChg"></span>
+      </div>
+      <div class="kpanel__ranges" id="kRanges">
+        <button data-bars="60">60日</button>
+        <button data-bars="120">120日</button>
+        <button data-bars="250" class="is-on">1年</button>
+        <button data-bars="500">2年</button>
+      </div>
+      <button class="kpanel__x" data-kclose aria-label="关闭">✕</button>
+    </div>
+    <div class="kpanel__legend" id="kLegend"></div>
+    <div class="kpanel__chart"><canvas id="kCanvas"></canvas></div>
+    <div class="kpanel__foot" id="kFoot"></div>
+  </div>
+</div>
+
 <script src="/static/app.js"></script>
 </body>
 </html>
