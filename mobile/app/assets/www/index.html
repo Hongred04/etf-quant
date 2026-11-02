@@ -16,6 +16,74 @@
     document.documentElement.dataset.theme = t;
   })();
 </script>
+<script>
+  /* 旧版 Android WebView 兼容垫片
+     ----------------------------------
+     minSdk=24（Android 7），而这类机器的系统 WebView 常常停在 Chrome 51，
+     没有 ES2017 的 String.padStart（Chrome 57 才有）。app.js 的 fmtLocal/
+     localDate 用它补零，渲染日期时一抛错，整页就停在半截——表现是"打开卡住"。
+     这里补齐用到的那几个 API，并把未捕获错误贴到页面上，别再白屏无提示。 */
+  (function () {
+    if (!String.prototype.padStart) {
+      String.prototype.padStart = function (len, pad) {
+        var s = String(this);
+        pad = pad === undefined ? " " : String(pad);
+        if (s.length >= len) return s;
+        var fill = "";
+        while (fill.length + s.length < len) fill += pad;
+        return fill.slice(0, len - s.length) + s;
+      };
+    }
+    if (!Array.prototype.includes) {
+      Array.prototype.includes = function (x) { return this.indexOf(x) !== -1; };
+    }
+    if (!Object.assign) {
+      Object.assign = function (t) {
+        for (var i = 1; i < arguments.length; i++) {
+          var s = arguments[i] || {};
+          for (var k in s) if (Object.prototype.hasOwnProperty.call(s, k)) t[k] = s[k];
+        }
+        return t;
+      };
+    }
+    if (!Object.entries) {
+      Object.entries = function (o) {
+        var r = [];
+        for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) r.push([k, o[k]]);
+        return r;
+      };
+    }
+    if (!Object.values) {
+      Object.values = function (o) {
+        return Object.keys(o).map(function (k) { return o[k]; });
+      };
+    }
+  })();
+
+  (function () {
+    function show(msg) {
+      try {
+        var b = document.getElementById("fatal");
+        if (!b) {
+          b = document.createElement("div");
+          b.id = "fatal";
+          b.style.cssText = "position:fixed;left:0;right:0;top:0;z-index:99999;background:#f6465d;"
+            + "color:#fff;font:12px/1.6 -apple-system,sans-serif;padding:10px 12px;"
+            + "white-space:pre-wrap;max-height:45vh;overflow:auto";
+          var add = function () { document.body.appendChild(b); };
+          if (document.body) add(); else document.addEventListener("DOMContentLoaded", add);
+        }
+        b.textContent += msg + "\n";
+      } catch (e) { /* 连报错都渲染不了就放弃，别二次抛错 */ }
+    }
+    window.addEventListener("error", function (e) {
+      show((e.message || "脚本错误") + "  @" + String(e.filename || "").split("/").pop() + ":" + e.lineno);
+    }, true);
+    window.addEventListener("unhandledrejection", function (e) {
+      show("未处理的 Promise 拒绝：" + ((e.reason && e.reason.message) || e.reason));
+    });
+  })();
+</script>
 </head>
 <body>
 
