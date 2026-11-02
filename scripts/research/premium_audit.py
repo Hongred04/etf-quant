@@ -34,8 +34,12 @@ from etfquant.pipeline import load_panel
 def main() -> int:
     p = load_panel(ROOT / "data" / "etf_pool.csv", ROOT / "data" / "cache",
                    "2021-01-01", "2026-10-30")
-    w = pd.read_csv(ROOT / "output" / "weights_s4_tgar_main.csv",
-                    index_col=0, parse_dates=True).fillna(0)
+    # 必须用**策略生成的目标权重**，不能读 weights_s4_tgar_main.csv。
+    # 那张表是每日持仓快照：权重会随价格漂移天天微变，diff 之后每天都被算成
+    # "加仓"，把大量非交易日的溢价混进来——实测会让加仓溢价 P90 从 1.65% 虚高到 7.21%。
+    from etfquant.strategy import TrendGatedAdaptive
+
+    w = pd.DataFrame(TrendGatedAdaptive(p).generate()).T.fillna(0.0)
     w = w.reindex(p.close.index).ffill().fillna(0)
 
     nav = pd.read_csv(ROOT / "data" / "etf_nav_history.csv", dtype={"ticker": str})

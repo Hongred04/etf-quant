@@ -487,6 +487,11 @@ class TrendGatedAdaptive(RotationBase):
         # 元标签仓位系数（可选）：行=调仓日、值∈[0.5,1] 的乘法系数，只缩放敞口。
         # 不改选股、不改排序，见 etfquant/meta.py 与 README 7.13。
         meta_exposure: pd.Series | None = None,
+        # 溢价尾部过滤（可选，README 7.21）：预计算的溢价率矩阵，行=调仓日、列=代码全称。
+        # 只在**新买入**时生效——已持有的标的不因溢价被强制卖出（卖出时溢价已兑现，
+        # 强行卖出只是把溢价风险换成交易成本）。无数据的标的放行，不能因缺数据就排除。
+        premium: pd.DataFrame | None = None,
+        premium_max: float | None = None,
         **kw,
     ):
         super().__init__(panel, **kw)
@@ -521,6 +526,8 @@ class TrendGatedAdaptive(RotationBase):
         self.secondary = secondary
         self.secondary_weight = float(secondary_weight)
         self.meta_exposure = meta_exposure
+        self.premium = premium
+        self.premium_max = premium_max
         self._nav_peak60: float | None = None
         self._nav: list[tuple[pd.Timestamp, float]] = []
 
@@ -682,6 +689,22 @@ class TrendGatedAdaptive(RotationBase):
         return sd * float(np.sqrt(252)) if np.isfinite(sd) else 0.0
 
     # ---------- 主逻辑 ---------- #
+    def _prem_ok(self, dt: pd.Timestamp, t: str) -> bool:
+        """该标的在 dt 的溢价是否可接受（≤ premium_max）。
+
+        三条规则：
+        - 没配溢价矩阵 / 没设阈值 → 一律放行（默认行为不变）；
+        - 该标的当天没有净值 → 放行。缺数据不等于高溢价，不能凭缺失排除它；
+        - 溢价是 NaN → 放行（用 v == v 判断，NaN 不等于自身）。
+        """
+        if self.premium is None or self.premium_max is None:
+            return True
+        try:
+            v = self.premium.at[dt, t]
+        except (KeyError, IndexError):
+            return True
+        return not (v == v and float(v) > self.premium_max)
+
     def target_weights(self, dt, eligible):
         # 债券不参与打分：其波动量级比股票类小一个数量级，R20 与权益品种不可比；
         # 债券只作为 "未用敞口" 的防守配置，由下方 rest 统一分配，避免重复计入。
@@ -760,7 +783,9 @@ class TrendGatedAdaptive(RotationBase):
                     for t in ranked:
                         if len(picks) >= self.top_n:
                             break
-                        if t not in picks:
+                        # 新买入的候选：溢价超过阈值就跳过，取排名下一位。
+                        # 已持仓的不做这一步——见 __init__ 里 premium 的注释。
+                        if t not in picks and self._prem_ok(dt, t):
                             picks.append(t)
                     if picks and self.vol_target:
                         rv = self._realized_vol(dt, picks)
