@@ -107,7 +107,7 @@
      下单表也需要它来算手数。每次同步后整体替换。 */
   var LIVE = { at: 0, prices: {} };
   var STORE_KEY = "etfq-store";
-  var ENGINE_VER = 4;          // 引擎口径变了就 +1，让旧缓存作废
+  var ENGINE_VER = 5;          // 引擎口径变了就 +1，让旧缓存作废
                                // v3：执行日改用本地日期（原 toISOString 少一天）
                                // v4：mergeBars 保留 meta，修复同步后债券仓位消失
 
@@ -420,6 +420,15 @@
   /** 用本地引擎在最新交易日重算，返回信号对象。
    *  @param {Object} [store] 调用方已 loadStore 过就传进来，省一次 JSON 解析 */
   function recompute(store) {
+    /* 没有新 K 线就不重算，直接沿用内置结果。
+     * 为什么：内置信号是桌面用完整交易日历算的，而手机只能自己推下一期
+     * （addBizDays 按工作日数，不认 A 股节假日）。同一天的数据各算一遍，
+     * 手机就会给出与电脑不同的"下次换仓"——曾经出现过 11-04 vs 11-02。
+     * 只有当手机确实拿到了更新的收盘 bar，重算才有意义。 */
+    var builtInDate = (D.signal && D.signal.date) || "";
+    var lastBar = HIST.dates && HIST.dates.length ? HIST.dates[HIST.dates.length - 1] : "";
+    if (builtInDate && lastBar && lastBar <= builtInDate) return null;
+
     var prep = EtfEngine.prepare(HIST);   // prep.meta 已含名称与类别
     var held = [];
     /* 缓冲带的「上一期持仓」必须跟着实际演进，不能永远拿 APK 内置快照。
@@ -639,7 +648,7 @@
         PROG.phase(0.94);
         mergeBars(store);
         var r = recompute(store);
-        setSignal(r.api);
+        if (r) setSignal(r.api);    // null = 没有更新的收盘 bar，沿用当前结果
         // 状态文案要先算好再存：早先写在 saveStore 之后，
         // 导致存进去的永远是上一次的结果（首次运行是空串）
         SYNC.lastAt = Date.now();
@@ -2166,8 +2175,10 @@
     }
     if (typeof EtfEngine !== "undefined") {
       try {
+        /* 有更新的收盘 bar 才重算；否则 SIG 保持内置（桌面口径），
+           避免手机自己推出来的"下次换仓"与电脑不一致。 */
         var r = recompute(cached);
-        setSignal(r.api);
+        if (r) setSignal(r.api);
       } catch (e) { /* 引擎异常时退回内置信号，至少页面能开 */ }
     }
 
