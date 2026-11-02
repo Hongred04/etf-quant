@@ -54,7 +54,8 @@ Windows 双击 `打开界面.bat` 起 Web 控制台（`http://127.0.0.1:8800/`�
 3. **口径只有一个来源**：对外一律 **11%~13%**，17.21% 只能称"样本内"。换算在 `etfquant/expectation.py`，
    数据在 `output/overfit_summary.json`。**禁止在任何地方手写这两个数字。**
 4. **结构类信号必须在线计算**（`etfquant/chan.py::online_states`）。全样本端点回放会虚增约 8 倍 CAGR。
-5. **改动后必跑**：`test`（296）+ `audit`（32）；改了 `strategy.py` 还要 `verify-engine`（手机端对拍）。
+5. **改动后必跑**：`test`（296）+ `audit`（32）；改了 `strategy.py` 还要 `verify-engine`（手机端对拍）；
+   改了 `web/` 跑 `python scripts/ui_smoke.py`（12 个用例，查 JS 报错/横向溢出/空渲染/NaN）。
 6. **不要在这个仓库里调参**：7.5 的 PBO 43.2% 已判定样本内搜索期望收益为负。只能靠前向。
 7. **依赖方向单向**：生产模块不得 import 研究模块；`etfquant` 不得 import `server`。
    新模块要登记 `docs/architecture.md` §1.5，否则 audit 的 L 节 FAIL。
@@ -91,7 +92,7 @@ Windows 双击 `打开界面.bat` 起 Web 控制台（`http://127.0.0.1:8800/`�
 |---|---|
 | 加因子 | `etfquant/factors.py` + `strategy.py::FactorBank`，A/B 用 `scripts/research/` 模板 |
 | 加策略 | `etfquant/strategy.py`（继承 `RotationBase`）+ `scripts/run_backtest.py` 注册 |
-| 改界面 | `web/app.js`（桌面）/ `mobile/.../app.js`（手机，改完要对拍） |
+| 改界面 | `web/app.js`（桌面）/ `mobile/.../app.js`（手机，改完要对拍）；改完跑 `scripts/ui_smoke.py`，截图落在 `ui_review/smoke/`（已 gitignore） |
 | 前向验证 | `etfquant/track.py::signal_fidelity`（live 归档 vs 回测同日目标）+ `build_track` 的 `forward` 段；改结构要同时抬 `TRACK_SCHEMA` |
 | 改 K 线弹窗 | 后端 `/api/kline`（server.py::api_kline）；前端 `drawKline`；买卖点来自 `output/trades_*.csv`，**不要用日频权重 diff** |
 | 加外部策略对照 | 先查 `docs/github_strategies.md` 是否已测过，再读 `docs/strategy_dd.md` 五道闸门 |

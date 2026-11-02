@@ -15,6 +15,33 @@
   } catch (e) { document.documentElement.dataset.theme = "dark"; }
 })();
 </script>
+<script>
+/* 冒烟探针：只收集，不上报。正常浏览只占几个字节；
+   scripts/ui_smoke.py 用 ?uismoke=1 读这些值做回归判断。 */
+window.__errs = [];
+window.addEventListener("error", function (e) {
+  window.__errs.push(String((e && (e.message || e.error)) || "error"));
+});
+window.addEventListener("unhandledrejection", function (e) {
+  window.__errs.push("reject: " + String(e && e.reason));
+});
+/* 兜底：如果 app 的 boot 直接崩了，主探针根本没机会执行。
+   这里保证 5 秒后一定有一份带错误的报告，冒烟脚本才不会把崩溃看成"没加载完"。 */
+if (/[?&]uismoke=1/.test(location.search)) {
+  setTimeout(function () {
+    if (document.title.indexOf("UISMOKE") === 0) return;
+    var view = document.querySelector("#view");
+    var de = document.documentElement;
+    document.title = "UISMOKE " + JSON.stringify({
+      page: "?", vw: innerWidth, sw: de.scrollWidth,
+      overflow: de.scrollWidth > innerWidth + 1,
+      empty: !(view && view.textContent && view.textContent.trim()),
+      badText: false, kline: false, fallback: true,
+      errs: (window.__errs || []).slice(0, 6)
+    });
+  }, 5000);
+}
+</script>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>

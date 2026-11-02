@@ -2920,6 +2920,27 @@
     const kp = new URLSearchParams(location.search).get("kline");
     if (kp) openKline(kp);
 
+    /* 冒烟模式：把"页面是否健康"写进 <title>，供无头浏览器一次性读取。
+       比截图对比稳（截图会因为字体/抗锯齿抖动），也比引入 puppeteer 轻。 */
+    if (/[?&]uismoke=1/.test(location.search)) {
+      setTimeout(() => {
+        const view = $("#view");
+        const text = view ? view.textContent || "" : "";
+        const de = document.documentElement;
+        const modal = $("#klineModal");
+        document.title = "UISMOKE " + JSON.stringify({
+          page: state.page,
+          vw: innerWidth,
+          sw: de.scrollWidth,
+          overflow: de.scrollWidth > innerWidth + 1,
+          empty: !text.trim(),
+          badText: /NaN|undefined|Infinity/.test(text),
+          kline: !!(modal && !modal.hidden),
+          errs: (window.__errs || []).slice(0, 6),
+        });
+      }, 2600);
+    }
+
     // 若后端正在跑任务，接管日志
     try {
       const a = await api("/api/actions");
