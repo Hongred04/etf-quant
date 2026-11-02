@@ -135,6 +135,48 @@ def test_status_flags_bt_lag(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# 自动更新的冷却重试
+# --------------------------------------------------------------------------- #
+# 场景：收盘后自动更新扑空（数据源当日 K 线还没入库），如果永久记"已尝试"，
+# 当天就再也不自动重试——用户看到"都收盘了还不更新"。冷却期过后必须放行。
+def test_auto_attempt_cooldown(monkeypatch):
+    monkeypatch.setattr(S, "_market_session",
+                        lambda: {"date": "2026-11-02", "time": "15:05"})
+    expected = S._expected_session()[0]
+
+    with S._AUTO_LOCK:
+        S._AUTO_ATTEMPT.clear()
+
+    # 从未尝试 → 不算已尝试
+    assert S.api_status()["auto_attempted"] is False
+
+    # 刚尝试过 → 冷却期内，视为已尝试
+    S.mark_auto_attempt()
+    assert S.api_status()["auto_attempted"] is True
+
+    # 冷却期过后（把时间戳往回拨）→ 放行下一次自动重试
+    with S._AUTO_LOCK:
+        S._AUTO_ATTEMPT["at"] = 0.0
+    assert S.api_status()["auto_attempted"] is False
+
+    with S._AUTO_LOCK:
+        S._AUTO_ATTEMPT.clear()
+
+
+def test_auto_attempt_key_change_retries(monkeypatch):
+    """盘中尝试过（目标日=昨日），收盘后目标日推进到今天 → 立即允许重试。"""
+    monkeypatch.setattr(S, "_market_session",
+                        lambda: {"date": "2026-11-02", "time": "15:05"})
+    expected_now = S._expected_session()[0]
+    with S._AUTO_LOCK:
+        S._AUTO_ATTEMPT["key"] = f"2026-11-02|NOT-{expected_now}"
+        S._AUTO_ATTEMPT["at"] = S.time.time()      # 刚刚尝试过，但 key 不同
+    assert S.api_status()["auto_attempted"] is False
+    with S._AUTO_LOCK:
+        S._AUTO_ATTEMPT.clear()
+
+
+# --------------------------------------------------------------------------- #
 # 仓位结构拆分（"半仓"到底指什么）
 # --------------------------------------------------------------------------- #
 def test_position_split_half_equity_half_bond():

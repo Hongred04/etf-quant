@@ -62,7 +62,30 @@
 
   /* ------------------------------------------------------------ 网络层 */
   /* 页面在 file:// 下是 opaque origin，fetch 跨域会被直接拒绝；
-     因此 Android 版走原生桥取字节，浏览器预览时才回落到 fetch。 */
+     因此 Android 版走原生桥取字节，浏览器预览时才回落到 fetch。
+     原生桥有同步/异步两个版本：
+     · httpGetBase64（同步）：JS 线程在整个 HTTP 期间被阻塞——而 WebView 的
+       JS 线程同时就是处理触摸的线程，请求一多整个界面点不动（首装回补
+       260 个请求时冻结几十秒，就是它）。只允许在异步桥不可用时兜底。
+     · httpGetBase64Async（异步）：原生线程池发请求，完成后回调
+       window.__httpDone(id, b64)。所有调用一律优先走它。 */
+  var HTTP_SEQ = 0;
+  var HTTP_CBS = {};
+  window.__httpDone = function (id, b64) {
+    var cb = HTTP_CBS[id];
+    delete HTTP_CBS[id];
+    if (cb) cb(b64 || "");
+  };
+
+  function httpGetAsync(url) {
+    return new Promise(function (resolve) {
+      var id = "h" + (++HTTP_SEQ);
+      HTTP_CBS[id] = resolve;
+      try { AndroidBridge.httpGetBase64Async(url, id); }
+      catch (e) { delete HTTP_CBS[id]; resolve(null); }
+    });
+  }
+
   function nativeBytes(url) {
     if (!(window.AndroidBridge && AndroidBridge.httpGetBase64)) return null;
     var b64;
@@ -74,7 +97,22 @@
     return arr;
   }
 
+  function b64ToText(b64, encoding) {
+    var bin = atob(b64);
+    var arr = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return new TextDecoder(encoding || "utf-8").decode(arr);
+  }
+
   function getText(url, encoding) {
+    /* 有异步桥（Android）：不发同步请求，UI 永不被网络阻塞 */
+    if (window.AndroidBridge && AndroidBridge.httpGetBase64Async) {
+      return httpGetAsync(url).then(function (b64) {
+        if (!b64) throw new Error("网络请求失败");
+        return b64ToText(b64, encoding);
+      });
+    }
+    /* 无原生桥：浏览器预览走 fetch；旧 APK 走同步桥（会卡，但至少能用） */
     return new Promise(function (resolve, reject) {
       var bytes = nativeBytes(url);
       if (bytes) {

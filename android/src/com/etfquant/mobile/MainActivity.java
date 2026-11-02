@@ -25,6 +25,8 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * 单 Activity 的 WebView 壳。
@@ -42,6 +44,8 @@ public class MainActivity extends Activity {
     private static final String LIGHT_BG = "#f5f6f8";
 
     private WebView web;
+    /** 异步 HTTP 用的线程池；onDestroy 里关闭。 */
+    private final ExecutorService httpPool = Executors.newFixedThreadPool(4);
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -180,10 +184,52 @@ public class MainActivity extends Activity {
             });
         }
 
+        /**
+         * 异步 GET：在后台线程池执行，完成后回调页面 window.__httpDone(cbId, b64)。
+         *
+         * 为什么必须有这个：同步版 httpGetBase64 虽然跑在 JavaBridge 线程上，
+         * 但 JS 是**同步等返回**的——WebView 的 JS 线程在整个 HTTP 期间被阻塞，
+         * 而它同时就是处理触摸事件的线程，表现为"点什么都没反应"。
+         * 首装回补要打 260 个请求，过去整个加载期界面都是冻住的。
+         * 页面侧的所有网络请求都应优先走本方法。
+         */
+        @JavascriptInterface
+        public void httpGetBase64Async(final String url, final String cbId) {
+            httpPool.execute(new Runnable() {
+                @Override
+                public void run() {
+                    final String b64 = httpGetBase64(url);
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (web == null) return;   // Activity 已销毁
+                            web.evaluateJavascript(
+                                    "window.__httpDone && window.__httpDone("
+                                            + jsonStr(cbId) + "," + jsonStr(b64) + ")", null);
+                        }
+                    });
+                }
+            });
+        }
+
         @JavascriptInterface
         public String platform() {
             return "android";
         }
+    }
+
+    /** 最小 JSON 字符串转义：Base64 输出本身安全，但 cbId 来自页面，不能裸拼。 */
+    private static String jsonStr(String s) {
+        if (s == null) return "\"\"";
+        StringBuilder sb = new StringBuilder(s.length() + 2);
+        sb.append('"');
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '"' || c == '\\') { sb.append('\\').append(c); }
+            else if (c < 0x20) { sb.append(String.format("\\u%04x", (int) c)); }
+            else { sb.append(c); }
+        }
+        return sb.append('"').toString();
     }
 
     private void postNotification(String title, String text) {
@@ -231,6 +277,7 @@ public class MainActivity extends Activity {
             web.destroy();
             web = null;
         }
+        httpPool.shutdownNow();
         super.onDestroy();
     }
 }

@@ -2277,12 +2277,18 @@
       return;
     }
     if (!st || !st.stale) { el.hidden = true; return; }
+    /* 收盘后数据仍落后，多半是数据源的当日 K 线还没入库（15:00 后陆续落库，
+       实测 15:0x 常拉不到）。自动更新扑空后每 15 分钟会自动重试一次，
+       把这件事说清楚，避免用户反复手点。 */
+    const retryHint = !st.intraday
+      ? "<br>已收盘但当日行情尚未入库（收盘后陆续发布），每 15 分钟会自动重试，无需反复手点。"
+      : "";
     el.className = "banner";
     el.innerHTML = `<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/><path d="M12 7.6v5.2M12 16.2v.1" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
       <div class="banner__text"><b>数据落后 ${st.behind_sessions} 个交易日</b>
         （当前到 ${esc(st.data_date)}，应到 ${esc(st.expected_date)}）。
         总览、回测持仓、效果验证都按数据末日计算，所以日期会停在那一天，不是程序算错。
-        ${st.intraday ? "<br>" + esc(st.market_open_hint) : ""}</div>
+        ${st.intraday ? "<br>" + esc(st.market_open_hint) : ""}${retryHint}</div>
       <button class="btn btn-sm" id="bannerUpdate">立即更新</button>`;
     el.hidden = false;
     const btn = $("#bannerUpdate");

@@ -962,7 +962,16 @@ _AUTO_LOCK = threading.Lock()
 # 自动更新去重：按「今天 | 目标交易日」记，而不是只按日期。
 # 盘中首次打开会把数据更到昨日；收盘后目标日推进到今天，key 变化，
 # 允许再自动跑一次——否则下午收盘后必须手动点。
-_AUTO_ATTEMPT: dict[str, str] = {}
+#
+# 但只按 key 去重还有一个漏洞：收盘后当日 K 线在数据源那边是**陆续入库**的
+# （2026-11-02 实测 15:09 拉 510300 仍只有上周五的 bar；10-30 那天 15:1x
+# 260 只里只有 63% 有当日 bar）。收盘后立刻触发的第一次自动更新必然扑空——
+# 任务"成功"结束，数据却没推进。如果这时把 key 记死，当天就再也不自动重试，
+# 用户看到的就是"都收盘了还不更新"。
+# 所以同一 key 只冷却 AUTO_RETRY_COOLDOWN 秒，超时后允许自动再试，
+# 直到数据追上目标日为止（重试一轮约 150 秒，15 分钟冷却最多空跑几轮）。
+_AUTO_ATTEMPT: dict[str, float] = {}
+AUTO_RETRY_COOLDOWN = 900
 _SESSION_CACHE: dict[str, tuple[float, dict]] = {}
 
 
@@ -1091,7 +1100,12 @@ def api_status() -> dict:
                 }
                 break
     with _AUTO_LOCK:
-        attempted = _AUTO_ATTEMPT.get("key") == _auto_key(expected)
+        # 冷却期内视为"已尝试"（前端不再自动触发）；冷却一过就放行下一次重试。
+        # 数据真正追上后 stale=False，轮询自然不会再触发。
+        last_key = _AUTO_ATTEMPT.get("key")
+        last_at = float(_AUTO_ATTEMPT.get("at") or 0.0)
+        attempted = (last_key == _auto_key(expected)
+                     and (time.time() - last_at) < AUTO_RETRY_COOLDOWN)
     bt_date = _bt_date()
     return {
         "data_date": data_date,
@@ -1115,6 +1129,7 @@ def _auto_key(expected: str) -> str:
 def mark_auto_attempt() -> None:
     with _AUTO_LOCK:
         _AUTO_ATTEMPT["key"] = _auto_key(_expected_session()[0])
+        _AUTO_ATTEMPT["at"] = time.time()
 
 
 # --------------------------------------------------------------------------- #
