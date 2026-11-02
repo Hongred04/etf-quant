@@ -196,8 +196,8 @@ def fetch_snapshot(
 _KLINE_KEYS = ("qfqday", "day", "hfqday")
 
 
-def fetch_kline_window(ticker: str, start: str, end: str, adjust: str = "qfq") -> pd.DataFrame:
-    """抓取单个时间窗口（<=640 根）的日线。"""
+def _fetch_window_raw(ticker: str, start: str, end: str, adjust: str = "qfq") -> pd.DataFrame:
+    """抓取单个时间窗口（<=640 根）的日线，不做任何补齐。"""
     param = f"{ticker},day,{start},{end},640,{adjust}"
     payload = None
     errors: list[str] = []
@@ -243,6 +243,77 @@ def fetch_kline_window(ticker: str, start: str, end: str, adjust: str = "qfq") -
     df["date"] = pd.to_datetime(df["date"])
     mask = (df["date"] >= pd.Timestamp(start)) & (df["date"] <= pd.Timestamp(end))
     return df.loc[mask].reset_index(drop=True)
+
+
+# 收盘后前复权序列会滞后（2026-11-02 15:40 实测）：
+#   · ifzq 的 fqkline 入口整段返回 HTTP 501（限流）
+#   · proxy 的 newfqkline qfq 最后日期还停在上一交易日
+#   · 同一入口的不复权 day **已经有当日 bar**，且两者在共同交易日只有复权系数之差
+#     （三只实测 close 比值恰好 1.0、成交量逐位相同）
+# 策略等不起几小时，所以当日 bar 用「不复权 × 系数」精确换算补上。
+# 只在收盘后、且缺口不超过 TAIL_FILL_DAYS 天时启用：盘中 day 序列那根是未完成的，
+# 长缺口则属于数据缺失（该报错），两者都不该走这条路径。
+_TAIL_FILL_DAYS = 10
+
+
+def fetch_kline_window(ticker: str, start: str, end: str, adjust: str = "qfq") -> pd.DataFrame:
+    """抓取单个时间窗口（<=640 根）的日线；qfq 会补齐尚未发布的当日 bar。"""
+    df = _fetch_window_raw(ticker, start, end, adjust)
+    if adjust != "qfq":
+        return df
+    return _fill_latest_from_raw(ticker, df, start, end)
+
+
+def _fill_latest_from_raw(
+    ticker: str, qfq: pd.DataFrame, start: str, end: str
+) -> pd.DataFrame:
+    """用不复权日线补 qfq 序列末尾缺失的当日 bar（换算系数取自最后一个共同交易日）。
+
+    系数 = qfq_close / raw_close（共同交易日）。即便当日发生分红，该系数依然成立：
+    前复权只改历史价格、不改当日价格。没有共同交易日就无法定系数，原样返回，
+    等下一次重试。
+    """
+    if qfq is None or qfq.empty or not is_market_closed():
+        return qfq
+    last = pd.Timestamp(qfq["date"].max())
+    end_ts = pd.Timestamp(end)
+    # 只处理"当下这一段"：历史窗口（研究脚本回看 2020 年）不补，
+    # 否则每抓一个旧窗口都会多发一轮请求，且没有意义。
+    if (pd.Timestamp.now().normalize() - end_ts).days > _TAIL_FILL_DAYS:
+        return qfq
+    if last >= end_ts or (end_ts - last).days > _TAIL_FILL_DAYS:
+        return qfq
+    try:
+        raw = _fetch_window_raw(ticker, start, end, "day")
+    except RuntimeError:
+        return qfq                      # 不复权也拿不到：保持原样，由上层重试
+    if raw is None or raw.empty:
+        return qfq
+    q_dates = pd.to_datetime(qfq["date"])
+    r_dates = pd.to_datetime(raw["date"])
+    common = sorted(set(q_dates) & set(r_dates))
+    if not common:
+        return qfq
+    base = common[-1]
+    q_close = float(qfq.loc[q_dates == base, "close"].iloc[0])
+    r_close = float(raw.loc[r_dates == base, "close"].iloc[0])
+    if not (q_close > 0 and r_close > 0):
+        return qfq
+    ratio = q_close / r_close
+    if not (1e-6 < ratio < 1e6):
+        return qfq
+    tail = raw.loc[r_dates > last].copy()
+    if tail.empty:
+        return qfq
+    for col in ("open", "close", "high", "low"):
+        tail[col] = tail[col] * ratio
+    # 成交量不做换算：复权只改价格，不改成交量（实测两序列逐位相同）
+    return (
+        pd.concat([qfq, tail], ignore_index=True)
+        .drop_duplicates(subset="date", keep="last")
+        .sort_values("date")
+        .reset_index(drop=True)
+    )
 
 
 def _month_windows(start: str, end: str, step_years: int = 2) -> list[tuple[str, str]]:

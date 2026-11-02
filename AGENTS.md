@@ -13,7 +13,7 @@ A 股 ETF 的量化轮动工具：260 只 ETF 横截面动量选 Top3（TGAR 策
 
 | 口径 | 值 |
 |---|---|
-| 样本内年化 | **16.99%**（回撤 −28.86%，夏普 0.68） |
+| 样本内年化 | **17.21%**（回撤 −28.86%，夏普 0.69） |
 | **对外预期** | **11%~13%**（锚点 12.62%，滚动前向样本外） |
 | 95% 置信区间 | **[−2.74%, +42.20%]**（块自助法，7.25） |
 | 亏钱概率 / 跑不过买指数 | **5.0% / 16.9%** |
@@ -27,7 +27,7 @@ A 股 ETF 的量化轮动工具：260 只 ETF 横截面动量选 Top3（TGAR 策
 ```bash
 .venv/Scripts/python.exe -m etfquant doctor     # 数据截止日 + 绩效 + 口径（先看这个）
 .venv/Scripts/python.exe -m etfquant refresh    # 更新行情 → 回测 → 信号（= 界面按钮）
-.venv/Scripts/python.exe -m etfquant test       # 271 项单测
+.venv/Scripts/python.exe -m etfquant test       # 276 项单测
 ```
 
 Windows 双击 `打开界面.bat` 起 Web 控制台（`http://127.0.0.1:8800/`）。
@@ -44,17 +44,17 @@ Windows 双击 `打开界面.bat` 起 Web 控制台（`http://127.0.0.1:8800/`�
 | `scripts/research/` | 一次性实验（23 个），产物进 `output/experiments/` | 只在做对照实验时 |
 | `output/` | **产物契约**见 `output/README.md`；顶层是 app 依赖，`experiments/` 可删 | 服务/报告 |
 | `data/` | 行情缓存、标的池、归档信号、**净值库** | 全部 |
-| `tests/` | 271 项单测 | 自检 |
+| `tests/` | 276 项单测 | 自检 |
 | `docs/` | 完整档案、架构、尽调清单、自查、一页总结 | 人 + Agent |
 
 ## 4. 硬约束（改代码前必读）
 
 1. **落盘必须原子写**：`etfquant/io_utils.atomic_to_csv / atomic_write_text`。直接 `to_csv` 会留半文件。
 2. **信号必须确定性**：任何"排名取前 N"都要显式 tie-break（分数降序 → 同分按原始 R20 降序）。
-3. **口径只有一个来源**：对外一律 **11%~13%**，16.99% 只能称"样本内"。换算在 `etfquant/expectation.py`，
+3. **口径只有一个来源**：对外一律 **11%~13%**，17.21% 只能称"样本内"。换算在 `etfquant/expectation.py`，
    数据在 `output/overfit_summary.json`。**禁止在任何地方手写这两个数字。**
 4. **结构类信号必须在线计算**（`etfquant/chan.py::online_states`）。全样本端点回放会虚增约 8 倍 CAGR。
-5. **改动后必跑**：`test`（271）+ `audit`（32）；改了 `strategy.py` 还要 `verify-engine`（手机端对拍）。
+5. **改动后必跑**：`test`（276）+ `audit`（32）；改了 `strategy.py` 还要 `verify-engine`（手机端对拍）。
 6. **不要在这个仓库里调参**：7.5 的 PBO 43.2% 已判定样本内搜索期望收益为负。只能靠前向。
 7. **依赖方向单向**：生产模块不得 import 研究模块；`etfquant` 不得 import `server`。
    新模块要登记 `docs/architecture.md` §1.5，否则 audit 的 L 节 FAIL。
@@ -73,7 +73,14 @@ Windows 双击 `打开界面.bat` 起 Web 控制台（`http://127.0.0.1:8800/`�
   实际是当初只从 2018-01 下载）。
 - **ETF 份额**：`data/etf_shares.csv`，两交所只给最新一日，历史不可得，别用来回测（7.14）。
 - **当日 K 线分批落库**：`PARTIAL_DAY_MIN_COVERAGE = 0.8` 门槛，低于就整天丢弃并让
-  `download_history` 以**退出码 3** 结束。看到"更新成功但数字没变"先查这条。
+  `download_history` 以**退出码 3** 结束；server 把 3 映射成任务状态 `wait`（不是失败）。
+- **⚠ 前复权序列收盘后滞后**（2026-11-02 15:40 实测）：qfq 最后日期停在上一交易日，
+  `ifzq` 入口整段 HTTP 501，而**不复权 `day` 已有当日 bar**。`fetch_kline_window` 因此在
+  收盘后、缺口 ≤10 天时，用「不复权 × 系数」补当日 bar（系数 = 最后一个共同交易日的
+  qfq/raw 收盘比；分红当天同样成立，因为前复权只改历史）。**不要图省事直接拿不复权价格
+  拼进 qfq 序列**——只要历史里有分红，接缝处就是假跳空，且不会报错。
+- **手机端同步一律走异步桥**：`AndroidBridge.httpGetBase64` 会阻塞 WebView 的 JS 线程
+  （= 触摸线程），首装回补 260 个请求时整个界面点不动。用 `httpGetBase64Async`（1.5.6+）。
 
 ## 6. 常见任务 → 该改哪里
 
@@ -106,7 +113,7 @@ Windows 双击 `打开界面.bat` 起 Web 控制台（`http://127.0.0.1:8800/`�
 - 数据截止：`python -m etfquant doctor`；
 - 归档：20 期（1 期真实 live + 19 期回填），纸上净值与同期回测偏差 0.00pp；
 - **试验登记 73 次**（`data/trials.json`），DSR 保守口径 7.5%；
-- **271 项单测、32 项审计**全过；
+- **276 项单测、32 项审计**全过；
 - **实验记录 7.1–7.27**，全部结论见 `docs/README_full.md` 第七章。近期关键：
   - 7.23 执行三约束：开盘成交→17.0%，**收盘成交→3.9%**；容量 100–500 万；0.30%/边失效
   - 7.24 信号衰减：IC 0.017–0.022，**20 日归零、40 日转负**

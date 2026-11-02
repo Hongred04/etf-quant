@@ -51,6 +51,7 @@
     hidden: new Set(),
     charts: [],
     task: null,
+    lastTask: null,        // 最近一次结束的任务：失败后点顶栏胶囊看日志用
     status: null,
     pollTimer: null,
     pendingAction: null,
@@ -2022,6 +2023,7 @@
     if (!chip) return;
     const fg = $("#taskRingFg");
     chip.hidden = false;
+    chip.classList.remove("is-err");     // 新任务开始，清掉上一次的失败红标
     if (text != null) $("#taskChipText").textContent = text;
     const hasStep = total > 1 && step > 0;
     chip.classList.toggle("is-indeterminate", !hasStep);
@@ -2048,6 +2050,44 @@
     $("#logBody").textContent = "";
     $("#taskChip").hidden = false;
     $("#taskChipText").textContent = "任务执行中";
+    $("#taskChip").classList.remove("is-err");
+  }
+
+  /* 日志只渲染一处：轮询与"点开历史任务"共用，避免两套格式漂移。 */
+  function paintLog(t) {
+    const body = $("#logBody");
+    const wasBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
+    body.innerHTML = (t.log || []).map((l) => {
+      const k = /^\[OK\]|^\[完成\]|passed|全部测试通过/.test(l) ? "ok"
+        : /^\[ERR\]|^\[失败\]|Error|Traceback/.test(l) ? "err" : "";
+      return k ? `<span class="${k}">${esc(l)}</span>` : esc(l);
+    }).join("\n");
+    if (wasBottom) body.scrollTop = body.scrollHeight;
+    const stateText = t.status === "done" ? "成功"
+      : t.status === "wait" ? "行情未入库" : "失败";
+    $("#logStatus").textContent = t.status === "running"
+      ? `${((Date.now() / 1000) - t.started).toFixed(0)}s`
+      : `${t.duration}s · ${stateText}`;
+  }
+
+  /* 已结束任务的日志：面板默认不弹，用户点顶栏的"失败"胶囊才展开。 */
+  async function showFinishedLog(tid) {
+    const p = $("#logPanel");
+    p.hidden = false;
+    $("#logBody").textContent = "";
+    try {
+      const t = await api("/api/task?id=" + tid);
+      const title = t.status === "done" ? "任务完成"
+        : t.status === "wait" ? "当日行情未入库" : "任务失败";
+      $("#logTitle").textContent = title;
+      // 顶栏胶囊保持"失败"语义——任务已经结束，不能再显示"任务执行中"
+      $("#taskChip").hidden = false;
+      $("#taskChipText").textContent = t.status === "error" ? "失败 · 查看日志" : title;
+      $("#taskChip").classList.toggle("is-err", t.status === "error");
+      paintLog(t);
+    } catch (e) {
+      $("#logStatus").textContent = "日志加载失败";
+    }
   }
 
   function closeLog() {
@@ -2055,11 +2095,13 @@
   }
   $("#logClose").addEventListener("click", closeLog);
 
-  /* 点顶栏圆环 = 我想看细节 */
+  /* 点顶栏圆环 = 我想看细节；任务失败后胶囊保留，点它看失败原因 */
   $("#taskChip")?.addEventListener("click", () => {
     if (state.task) {
       openLog(state.task);
-      if (state.task) pollTask(state.task);
+      pollTask(state.task);
+    } else if (state.lastTask) {
+      showFinishedLog(state.lastTask);
     }
   });
 
@@ -2068,14 +2110,7 @@
     state.pollTimer = setInterval(async () => {
       try {
         const t = await api("/api/task?id=" + tid);
-        const body = $("#logBody");
-        const wasBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
-        body.innerHTML = (t.log || []).map((l) => {
-          const k = /^\[OK\]|^\[完成\]|passed|全部测试通过/.test(l) ? "ok"
-            : /^\[ERR\]|^\[失败\]|Error|Traceback/.test(l) ? "err" : "";
-          return k ? `<span class="${k}">${esc(l)}</span>` : esc(l);
-        }).join("\n");
-        if (wasBottom) body.scrollTop = body.scrollHeight;
+        paintLog(t);
 
         if (t.status === "running") {
           const total = t.total_steps || 1;
@@ -2084,19 +2119,16 @@
             total > 1 && step ? `${t.label} ${step}/${total}` : t.label);
         }
 
-        $("#logStatus").textContent = t.status === "running"
-          ? `${((Date.now() / 1000) - t.started).toFixed(0)}s`
-          : `${t.duration}s · ${t.status === "done" ? "成功" : "失败"}`;
-
         if (t.status !== "running") {
           clearInterval(state.pollTimer);
           state.pollTimer = null;
           state.task = null;
-          $("#logTitle").textContent = t.status === "done" ? "任务完成" : "任务失败";
-          hideTaskRing();
+          state.lastTask = tid;
           $$("[data-run]").forEach((b) => (b.disabled = false));
           $("#btnBacktest").disabled = false;
           if (t.status === "done") {
+            $("#logTitle").textContent = "任务完成";
+            hideTaskRing();
             toast(`${t.label} 完成（${t.duration}s）`, "ok");
             if (state.pendingAction) {
               const next = state.pendingAction;
@@ -2106,10 +2138,22 @@
             }
             await refreshAll();
             await checkFreshness(false);
+          } else if (t.status === "wait") {
+            /* 收盘后当日 Bar 尚未发布 = "还没到"，不是失败：
+               不弹日志、不刷红，顶栏胶囊提示会自动恢复。 */
+            hideTaskRing();
+            $("#logTitle").textContent = "当日行情未入库";
+            toast(`${t.label}：当日行情尚未入库，稍后会自动重试`, "ok", 5200);
+            await checkFreshness(false);
           } else {
-            // 失败才自动弹日志：这时用户确实需要看原因，成功时不必打扰
-            openLog(tid);
-            toast(`${t.label} 失败，日志已打开`, "err");
+            /* 失败不再自动弹面板（用户明确要求）：改成顶栏红色胶囊，
+               点它才展开日志，需要排查时一步可达。 */
+            $("#logTitle").textContent = "任务失败";
+            $("#taskChip").hidden = false;
+            $("#taskChip").classList.add("is-err");
+            $("#taskChipText").textContent = "失败 · 查看日志";
+            toast(`${t.label} 失败，点右上角「失败 · 查看日志」看原因`, "err", 6000);
+            await checkFreshness(false);
           }
         }
       } catch (e) { /* 忽略瞬时错误 */ }

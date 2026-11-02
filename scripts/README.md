@@ -16,7 +16,7 @@
 | `rebalance_status.py` | `status` | 今天该不该动手、下次哪天换（可 `--json`/`--check`） | 归档 | 终端 |
 | `monthly_report.py` | `monthly` | 前向验证月报（含 alpha 残差跟踪与误差棒） | 归档、纸上净值、`diagnostics.json` | `output/reports/monthly_*.md` |
 | `audit.py` | `audit` | 32 项口径自检（记账、成本、日期、JSON 合法、三端一致） | 全部产物 | 终端 |
-| `test_runner.py` | `test` | 单元测试（271 项） | `tests/` | 终端 |
+| `test_runner.py` | `test` | 单元测试（276 项） | `tests/` | 终端 |
 | `export_mobile_data.py` | `mobile-data` | 导出 App 的 `data.js` | `server.build_mobile_payload` | `mobile/app/assets/www/data.js` |
 | `verify_mobile_engine.py` | `verify-engine` | 手机端 JS 与 Python 引擎逐点对拍 | 缓存、`engine.js` | 终端 |
 | `backfill_archive.py` | `backfill` | 回填历史归档（`source=backfill`） | 缓存、策略 | `data/signal_archive.csv` |

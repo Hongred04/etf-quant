@@ -892,6 +892,13 @@ kbd {
   color: var(--accent);
 }
 .task-chip[hidden] { display: none !important; }
+/* 任务失败后的常驻胶囊：不再自动弹日志面板，改成点它才展开 */
+.task-chip.is-err {
+  background: rgba(246, 70, 93, 0.12);
+  border-color: rgba(246, 70, 93, 0.4);
+  color: var(--up);
+  cursor: pointer;
+}
 .spinner {
   width: 11px;
   height: 11px;

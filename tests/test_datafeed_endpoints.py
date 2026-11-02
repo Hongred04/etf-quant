@@ -108,3 +108,63 @@ def test_empty_payload_is_not_an_error(monkeypatch):
     df = DF.fetch_kline_window("sh510300", "2020-01-01", "2020-01-03")
     assert df.empty
     assert all(v == "ok" for v in DF.endpoint_health().values())
+
+
+# --------------------------------------------------------------------------- #
+# 收盘后前复权滞后：用不复权日线补当日 bar
+# --------------------------------------------------------------------------- #
+# 2026-11-02 15:40 实测：qfq 序列停在上一交易日，不复权 day 已有当日，
+# 而策略等不起。两者只差一个复权系数，可精确换算。
+def _payload_key(rows: list[list[str]], key: str) -> str:
+    return json.dumps({"code": 0, "data": {"sh510300": {key: rows}}})
+
+
+def _two_series(monkeypatch, *, raw_has_today: bool, closed: bool = True):
+    today = pd.Timestamp.today().normalize()
+    d1 = (today - pd.Timedelta(days=3)).strftime("%Y-%m-%d")
+    d0 = (today - pd.Timedelta(days=4)).strftime("%Y-%m-%d")
+    t = today.strftime("%Y-%m-%d")
+    # 不复权价格是 qfq 的 2 倍 → 换算系数 0.5
+    qfq = [
+        [d0, "1.00", "1.10", "1.20", "0.90", "100"],
+        [d1, "1.10", "1.10", "1.20", "1.00", "110"],
+    ]
+    raw = [
+        [d0, "2.00", "2.20", "2.40", "1.80", "100"],
+        [d1, "2.20", "2.20", "2.40", "2.00", "110"],
+    ]
+    if raw_has_today:
+        raw.append([t, "2.22", "2.20", "2.30", "2.10", "90"])
+
+    def fake(url, **kw):
+        return _payload_key(raw if url.endswith(",day") else qfq,
+                            "day" if url.endswith(",day") else "qfqday")
+
+    monkeypatch.setattr(DF, "_http_get", fake)
+    monkeypatch.setattr(DF, "is_market_closed", lambda now=None: closed)
+    return d0, d1, t
+
+
+def test_fills_today_bar_from_unadjusted(monkeypatch):
+    """qfq 缺当日、不复权有当日 → 按系数换算补上（成交量不换算）。"""
+    d0, d1, t = _two_series(monkeypatch, raw_has_today=True)
+    df = DF.fetch_kline_window("sh510300", d0, t)
+    assert df["date"].dt.strftime("%Y-%m-%d").tolist() == [d0, d1, t]
+    last = df.iloc[-1]
+    assert abs(last["close"] - 1.10) < 1e-9       # 2.20 × 0.5
+    assert abs(last["open"] - 1.11) < 1e-9        # 2.22 × 0.5
+    assert last["volume"] == 90                   # 成交量不做复权换算
+
+
+def test_no_fill_intraday(monkeypatch):
+    """盘中不复权那根是未完成的，绝不能当收盘价写进来。"""
+    d0, _, t = _two_series(monkeypatch, raw_has_today=True, closed=False)
+    df = DF.fetch_kline_window("sh510300", d0, t)
+    assert df["date"].max().strftime("%Y-%m-%d") != t
+
+
+def test_no_fill_without_today_in_raw(monkeypatch):
+    """不复权也没有当日 → 保持原样，交给上层重试，不能凭空造 bar。"""
+    d0, d1, t = _two_series(monkeypatch, raw_has_today=False)
+    df = DF.fetch_kline_window("sh510300", d0, t)
+    assert df["date"].dt.strftime("%Y-%m-%d").tolist() == [d0, d1]

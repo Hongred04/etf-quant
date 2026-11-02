@@ -260,7 +260,11 @@ def start_task(action: str) -> str:
         finally:
             with TASK_LOCK:
                 TASKS[tid]["code"] = code
-                TASKS[tid]["status"] = "done" if code == 0 else "error"
+                # 退出码 3 = 收盘后当日 bar 尚未发布（download_history 的 partial_day）。
+                # 这不是"出错"，是"还没到"：单列一个 wait 状态，前端不该当失败弹日志。
+                TASKS[tid]["status"] = (
+                    "done" if code == 0 else "wait" if code == 3 else "error"
+                )
                 TASKS[tid]["duration"] = round(time.time() - TASKS[tid]["started"], 1)
                 _prune_tasks()
             invalidate_cache()
