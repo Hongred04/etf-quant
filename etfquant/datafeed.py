@@ -508,6 +508,45 @@ def strip_partial_day(
     return out, info
 
 
+# 前复权序列会被供应商"重锚"：任何一次分红/拆分之后，**全部历史**都按新因子
+# 重算。而增量更新只补最后 10 天并用 keep="last" 合并——老数据永远停在旧锚上，
+# 接缝处于是出现一个等于分红幅度的假跳空，并且**不会自愈**（增量永远碰不到
+# 老数据）。这个跳空会直接进入动量、波动率与回测收益，全程没有任何报错。
+# 2026-11-02 实测 510880 / 511010 / 159915 的新旧比价恰好 1.000000，说明当前
+# 缓存与供应商同锚；但没有检测机制，下一次分红就会静默污染。
+QFQ_REANCHOR_TOL = 0.004      # 0.4%：3 位小数在 0.9 元价位上的舍入误差约 0.11%
+QFQ_REANCHOR_MIN_POINTS = 5   # 重叠点太少时中位数不可信
+
+
+def qfq_reanchor_ratio(
+    cached: pd.DataFrame, fresh: pd.DataFrame,
+    min_points: int = QFQ_REANCHOR_MIN_POINTS,
+) -> float | None:
+    """重叠交易日上「新抓 close ÷ 缓存 close」的中位数；无法判断时返回 None。
+
+    1.0 表示同一复权锚；偏离 1 说明供应商把历史重算了。用中位数而不是均值，
+    是为了让个别停牌/错价点不影响判断。
+    """
+    if cached is None or fresh is None or cached.empty or fresh.empty:
+        return None
+    if not {"date", "close"} <= set(cached.columns) or not {"date", "close"} <= set(fresh.columns):
+        return None
+    a = cached[["date", "close"]].dropna().copy()
+    b = fresh[["date", "close"]].dropna().copy()
+    # 缓存从 CSV 读进来是 datetime64[us]，实时抓的是 [ns]，直接 merge 会抛
+    # "trying to merge on different resolutions"。统一到 ns。
+    a["date"] = a["date"].astype("datetime64[ns]")
+    b["date"] = b["date"].astype("datetime64[ns]")
+    m = pd.merge(a, b, on="date", suffixes=("_old", "_new"))
+    m = m[(m["close_old"] > 0) & (m["close_new"] > 0)]
+    if len(m) < min_points:
+        return None
+    ratio = float((m["close_new"] / m["close_old"]).median())
+    if not np.isfinite(ratio) or ratio <= 0:
+        return None
+    return ratio
+
+
 def download_panel(
     tickers: list[str],
     start: str,
@@ -584,6 +623,23 @@ def download_panel(
                     tail = fetch_kline(tk, tail_start, end, cache.adjust)
                     tail = drop_unfinished_today(tail)
                     if not tail.empty:
+                        ratio = qfq_reanchor_ratio(df, tail)
+                        if ratio is not None and abs(ratio - 1.0) > QFQ_REANCHOR_TOL:
+                            # 供应商把历史按新复权因子重算了（分红/拆分）。
+                            # 只补尾部会在接缝处留下假跳空，必须整段重下；
+                            # 整段失败就这一轮不更新，宁可下次重试也不写脏数据。
+                            if report is not None:
+                                report.setdefault("reanchored", {})[tk] = round(ratio, 6)
+                            full = fetch_kline(tk, start, end, cache.adjust)
+                            full = drop_unfinished_today(full)
+                            if full.empty:
+                                raise RuntimeError(
+                                    f"前复权重锚（比价 {ratio:.4f}），整段重下为空，"
+                                    "本轮不更新该标的"
+                                )
+                            atomic_to_csv(full, fp, index=False)
+                            _gap(tk, full)
+                            return tk, full
                         df = (
                             pd.concat([df, tail], ignore_index=True)
                             .drop_duplicates(subset="date", keep="last")

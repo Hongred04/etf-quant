@@ -131,6 +131,13 @@ def main() -> int:
     # 失败与缺口必须显式暴露：这些标的的数据不可信，报告与信号都不能当它没问题
     failed = report.get("failed") or {}
     gaps = report.get("gaps") or {}
+    reanchored = report.get("reanchored") or {}
+    if reanchored:
+        # 分红/拆分后供应商会把全部历史按新因子重算；这是自动整段重下的记录，
+        # 不是错误，但必须可见——否则用户不知道缓存被整体改写过。
+        print(f"[WARN] {len(reanchored)} 只标的的前复权被供应商重锚，已整段重下：")
+        for tk, r in list(reanchored.items())[:10]:
+            print(f"       {tk}  新旧比价 {r:.4f}")
     if failed:
         print(f"[WARN] {len(failed)} 只标的抓取失败（未写缓存，下次会重试）：")
         for tk, msg in list(failed.items())[:10]:
