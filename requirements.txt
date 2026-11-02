@@ -1,3 +1,7 @@
 pandas>=2.0
 numpy>=1.24
 pytest>=7.0
+
+# 仅 scripts/download_etf_nav.py 需要：抓 ETF 历史单位净值（同花顺源，算场内溢价）
+# 不是运行/回测的必需依赖——缺它时主流程完全正常
+akshare>=1.20

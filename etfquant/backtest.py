@@ -44,10 +44,25 @@ class Backtester:
         open_: pd.DataFrame | None = None,
         fee: float = 0.0003,
         slippage: float = 0.0007,
+        cb_tickers: set[str] | None = None,
+        cb_extra: float = 0.0,
     ):
         self.close = close.sort_index().ffill()
         self.open = (open_.sort_index().ffill() if open_ is not None else self.close)
         self.cost_per_side = fee + slippage
+        # 跨境 ETF 的额外单边成本，用于量化"场内溢价"这种拿不到 IOPV 的损耗。
+        # 默认 0：不影响任何既有回测。只在做敏感性测试时传入。
+        self.cb_tickers = set(cb_tickers or ())
+        self.cb_extra = float(cb_extra)
+
+    def _cb_turn(self, a: pd.Series, b: pd.Series, cols) -> float:
+        """换手中来自跨境标的的单边部分。溢价损耗只发生在它们身上。"""
+        if self.cb_extra <= 0 or not self.cb_tickers:
+            return 0.0
+        idx = [c for c in cols if c in self.cb_tickers]
+        if not idx:
+            return 0.0
+        return 0.5 * float((a.reindex(idx).fillna(0.0) - b.reindex(idx).fillna(0.0)).abs().sum())
 
     def run(
         self,
@@ -114,7 +129,9 @@ class Backtester:
                     # 从而漏算买入新标的与清仓的成交额，换手会被严重低估。
                     turn = 0.5 * float((tgt.reindex(cols).fillna(0.0) - w).abs().sum())
                     # 实际成交金额 = Σ|Δw| = 2 × 单边换手，成本按成交金额计
-                    trade_cost = 2.0 * turn * self.cost_per_side
+                    # 跨境部分另加 cb_extra：场内溢价拿不到 IOPV，只能以等价成本近似
+                    cb_turn = self._cb_turn(tgt.reindex(cols).fillna(0.0), w, cols)
+                    trade_cost = 2.0 * turn * self.cost_per_side + 2.0 * cb_turn * self.cb_extra
                     nav *= 1 - trade_cost
                     _record(dt, w, tgt)
                     # 必须补齐到全标的索引，否则 w 会退化成稀疏索引，
@@ -152,7 +169,8 @@ class Backtester:
                 tgt = self._norm(exec_targets[dt])
                 turn = 0.5 * float((tgt.reindex(cols).fillna(0.0) - w).abs().sum())
                 # 实际成交金额 = Σ|Δw| = 2 × 单边换手，成本按成交金额计
-                trade_cost = 2.0 * turn * self.cost_per_side
+                cb_turn = self._cb_turn(tgt.reindex(cols).fillna(0.0), w, cols)
+                trade_cost = 2.0 * turn * self.cost_per_side + 2.0 * cb_turn * self.cb_extra
                 nav *= 1.0 - trade_cost
                 _record(dt, w, tgt)
                 w = tgt.reindex(cols).fillna(0.0)
