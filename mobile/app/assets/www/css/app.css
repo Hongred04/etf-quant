@@ -1014,3 +1014,19 @@ table.tbl tr.is-hl td { background: var(--accent-soft); }
 .strength__label { font-size: 11.5px; color: var(--txt-3); }
 .strength b { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .strength .dim { font-size: 11.5px; }
+
+/* ---------------------------------------------------- 手机端性能降级
+   backdrop-filter 会在每一帧重新计算模糊，低端机首屏与滚动时最贵。
+   手机宽度下换成纯色（顶栏/底栏本身是深色，视觉差异很小）。 */
+@media (max-width: 600px) {
+  .appbar,
+  .tabbar {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: var(--bg);
+  }
+  .sheet-backdrop {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}

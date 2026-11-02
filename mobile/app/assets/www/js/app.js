@@ -2198,11 +2198,14 @@
        失败静默——地铁里打开 App 不该弹一堆报错。 */
     // ?nosync=1 跳过自动同步：预览/截图/纯离线场景用，避免每次打开都打网络请求
     if (!/[?&]nosync=1/.test(location.search)) {
+      /* 首次安装没有缓存：把自动同步再往后放，先让首屏画完再打 260 个请求。
+         有缓存时 700ms 足够（上次结果已经能立刻显示）。 */
+      var bootDelay = loadStore() ? 700 : 1600;
       setTimeout(function () {
         syncMarket(false).then(function (ok) {
           if (!ok) SYNC.lastMsg = "离线 · 显示上次结果";
         });
-      }, 700);
+      }, bootDelay);
     }
 
     window.addEventListener("resize", function () {
