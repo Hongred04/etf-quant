@@ -93,9 +93,15 @@ ACTIONS: dict[str, dict] = {
                  "seconds": 60, "timeout": 900},
     "signal": {"script": "run_signal.py", "args": [], "label": "生成选股信号",
                "seconds": 15, "timeout": 300},
-    # 组合任务：行情 → 回测 → 信号。顺序不能换：回测依赖新行情，信号依赖新回测。
-    "refresh": {"steps": ["download", "backtest", "signal"], "label": "更新行情并重算",
-                "seconds": 150, "timeout": 2400},
+    # 组合指标依赖回测产物（output/combo.json 是各档 core_weight 的回测结果），
+    # 重跑回测后必须跟着重算，否则总览页显示的是上一轮回测的组合数字。
+    "combo": {"script": "combo_report.py", "args": [], "label": "重算核心-卫星组合指标",
+              "seconds": 45, "timeout": 900},
+    "backtest_combo": {"steps": ["backtest", "combo"], "label": "重跑回测并更新组合",
+                       "seconds": 105, "timeout": 1800},
+    # 组合任务：行情 → 回测 → 信号 → 组合指标。顺序不能换：后一步都依赖前一步的产物。
+    "refresh": {"steps": ["download", "backtest", "signal", "combo"],
+                "label": "更新行情并重算", "seconds": 195, "timeout": 2700},
     "report": {"script": "make_report.py", "args": [], "label": "生成研究报告",
                "seconds": 12, "timeout": 300},
     "test": {"script": "test_runner.py", "args": [], "label": "运行单元测试",
@@ -471,6 +477,10 @@ def api_overview() -> dict:
         "annual": annuals,
         "perf": perf_rows,
         "expect": expect,
+        # 超额收益的时间分布：页脚原来写死「2019—2023 累计超额 +0.9pp / 2019—2021 跑输 9pp」，
+        # 那是旧记账口径下的数；修完跳空漏记后前段实际跑输十几 pp，结论没变但量级差一个数量级。
+        # 分段边界固定，数值现算。
+        "excess_split": _excess_split(nav_self, nav_bench),
         # 水下时长：回答"多久没回本"，与 drawdown（跌多深）互补。
         # 回撤 20% 拖三年比回撤 30% 六个月恢复更难受，但 MDD 看不出这件事。
         "underwater": {
@@ -482,6 +492,38 @@ def api_overview() -> dict:
         # 不给出组合口径，用户会以为自己的回撤预期是 -35%。
         "combo": _combo_summary(),
     }
+
+
+def _excess_split(nav_self: pd.Series, nav_bench: pd.Series | None) -> list[dict] | None:
+    """卫星腿相对基准的分段超额。分段边界写死（便于跨期比较），数值现算。
+
+    页面上原来说「2019—2023 累计超额仅 +0.9pp、2019—2021 跑输约 9pp」。
+    那是旧回测器的输出——那时持仓过夜的跳空盈亏记进了权重、没记进净值，
+    等于系统性漏掉了一部分跌幅。修完之后前段超额是 −17pp 量级。
+    结论（超额集中在 2024 年以后）不变，但数字必须换成现算的。
+    """
+    if nav_bench is None or len(nav_self) < 20:
+        return None
+
+    def cum(s: pd.Series, a: pd.Timestamp, z: pd.Timestamp) -> float | None:
+        q = s[(s.index >= a) & (s.index <= z)]
+        if len(q) < 2 or q.iloc[0] == 0:
+            return None
+        return float(q.iloc[-1] / q.iloc[0] - 1.0)
+
+    bs = nav_bench.reindex(nav_self.index).ffill()
+    out = []
+    for label, a, z in [
+        ("2019—2021", "2019-01-01", "2021-12-31"),
+        ("2022—2023", "2022-01-01", "2023-12-31"),
+        ("2024 至今", "2024-01-01", "2099-12-31"),
+    ]:
+        a_, z_ = pd.Timestamp(a), pd.Timestamp(z)
+        cs, cb = cum(nav_self, a_, z_), cum(bs, a_, z_)
+        if cs is None or cb is None:
+            continue
+        out.append({"label": label, "strat": cs, "bench": cb, "excess": cs - cb})
+    return out or None
 
 
 def _combo_summary() -> dict | None:
@@ -505,12 +547,14 @@ def _combo_summary() -> dict | None:
     base = next((r for r in rows if float(r.get("core_weight", -1)) == 0.0), None)
     return {
         "core_weight": cw,
+        "core_codes": data.get("core_codes") or [],
         "start": data.get("start"),
         "end": data.get("end"),
         "active": pick,
         "satellite": base,
         "corr": data.get("corr"),
         "rolling": data.get("rolling"),
+        "segments": data.get("segments"),
     }
 
 
@@ -730,12 +774,120 @@ def api_research() -> dict:
                       for v in df.loc[i].tolist()] for i in df.index],
         }
 
+    ladder = table(OUT / "ladder.csv")
+    ablation = table(OUT / "ablation.csv")
+    subsample = table(OUT / "subsample2.csv")
+    # 分段超额与总览页共用同一个函数，避免两页各算一套
+    nav = _csv(OUT / "nav_main.csv", index_col=0, parse_dates=True)
+    split = None
+    if nav is not None and SELF in nav.columns:
+        bench = nav[BENCH].dropna() if BENCH in nav.columns else None
+        split = _excess_split(nav[SELF].dropna(), bench)
     return {
-        "ladder": table(OUT / "ladder.csv"),
-        "ablation": table(OUT / "ablation.csv"),
-        "subsample": table(OUT / "subsample2.csv"),
+        "ladder": ladder,
+        "ablation": ablation,
+        "subsample": subsample,
+        "brief": _research_brief(ladder, ablation, subsample),
+        "excess_split": split,
         "overfit": _overfit_payload(),
     }
+
+
+def _research_brief(ladder: dict | None, ablation: dict | None,
+                    subsample: dict | None) -> dict:
+    """从实验表里**现算**页面上的结论数字，不再让前端手写。
+
+    为什么必须现算：这张页面原来写死了「多因子 17.7% vs 纯动量 23.9%」「缓冲带
+    12.5% → 14.7%」「前段 11.2% 基准 11.0%」等一串数字。2026-11 修复回测记账
+    （持 stock 过夜跳空只算了权重、没乘净值）之后，全样本年化从 17% 级别掉到 12%，
+    这些硬编码立刻全部失效——页面还在用旧结论讲新数据。
+
+    做法：按行的关键字模糊匹配取对应配置，算 delta；匹配不到就返回 None，
+    前端自动隐藏该条，宁可少说一句也不说错一句。
+    """
+    def pick(tbl: dict | None, *keys: str) -> dict | None:
+        """在行名里找第一个**同时包含全部关键字**的行，返回 {列名: 值}。
+
+        传入多个关键字是为了在不改动脚本产出的前提下容忍行名微调——
+        例如表格从「7. 闸门改为仅降半仓(不空仓)」改成别的措辞时，
+        ("仅降半仓",) 仍然命中，而不会静默退回 None 让整段说明消失。
+        """
+        if not tbl:
+            return None
+        for i, name in enumerate(tbl["index"]):
+            if all(k in name for k in keys):
+                return dict(zip(tbl["columns"], tbl["rows"][i]))
+        return None
+
+    def g(row: dict | None, col: str) -> float | None:
+        if not row:
+            return None
+        v = row.get(col)
+        return float(v) if isinstance(v, (int, float)) else None
+
+    C = "年化收益(CAGR)"
+
+    out: dict = {"available": bool(ladder or ablation or subsample)}
+
+    # ---- 实验一：从纯动量往上加模块，最终版相对起点怎么变 ----
+    l_base = pick(ladder, "纯动量")
+    l_final = pick(ladder, "仅降半仓")
+    if l_base and l_final:
+        out["ladder"] = {
+            "base_cagr": g(l_base, C), "base_mdd": g(l_base, "最大回撤"),
+            "final_cagr": g(l_final, C), "final_mdd": g(l_final, "最大回撤"),
+            "final_calmar": g(l_final, "卡玛比率"),
+        }
+    # 缓冲带那一步：加上它 vs 上一步
+    l_buf = pick(ladder, "排名缓冲带")
+    l_buf_prev = pick(ladder, "拥挤度过滤")
+    if l_buf and l_buf_prev:
+        out["buffer"] = {
+            "before_cagr": g(l_buf_prev, C), "after_cagr": g(l_buf, C),
+            "before_mdd": g(l_buf_prev, "最大回撤"), "after_mdd": g(l_buf, "最大回撤"),
+        }
+    l_multi = pick(ladder, "多因子")
+    if l_base and l_multi:
+        out["multi"] = {"pure_cagr": g(l_base, C), "multi_cagr": g(l_multi, C)}
+    l_vol = pick(ladder, "波动率倒数加权")
+    if l_vol and l_final:
+        out["inv_vol"] = {"vol_cagr": g(l_vol, C), "final_cagr": g(l_final, C),
+                          "vol_sharpe": g(l_vol, "夏普比率"),
+                          "final_sharpe": g(l_final, "夏普比率")}
+    l_top5 = pick(ladder, "Top5")
+    if l_top5 and l_final:
+        out["top5"] = {"top5_cagr": g(l_top5, C), "final_cagr": g(l_final, C)}
+
+    # ---- 实验二：从完整模型往下拆，关了谁最疼 ----
+    a_full = pick(ablation, "完整模型")
+    if a_full:
+        out["ablation"] = {"full": {"cagr": g(a_full, C), "mdd": g(a_full, "最大回撤"),
+                                    "sharpe": g(a_full, "夏普比率")}}
+        for key, tag in [
+            (("关闭", "闸门"), "gate"), (("回撤熔断",), "dd_brake"),
+            (("关闭", "缓冲带"), "buffer"), (("关闭", "趋势"), "trend"),
+            (("关闭", "拥挤度"), "crowd"), (("波动率倒数",), "inv_vol"),
+            (("10 日",), "reb10"), (("20 日",), "reb20"),
+        ]:
+            row = pick(ablation, *key)
+            if row:
+                out["ablation"][tag] = {"cagr": g(row, C), "mdd": g(row, "最大回撤"),
+                                        "sharpe": g(row, "夏普比率")}
+
+    # ---- 实验三：前后两段，策略与基准各自的表现 ----
+    if subsample:
+        seg = {}
+        for i, name in enumerate(subsample["index"]):
+            row = dict(zip(subsample["columns"], subsample["rows"][i]))
+            seg[name] = {
+                "strat_cagr": float(row["最终模型_CAGR"]) if row.get("最终模型_CAGR") is not None else None,
+                "bench_cagr": float(row["基准CAGR"]) if row.get("基准CAGR") is not None else None,
+                "strat_mdd": float(row["最终模型_MaxDD"]) if row.get("最终模型_MaxDD") is not None else None,
+                "bench_mdd": float(row["基准MaxDD"]) if row.get("基准MaxDD") is not None else None,
+            }
+        out["subsample"] = seg
+
+    return out
 
 
 def _expectancy(sample_cagr: float | None = None) -> dict | None:

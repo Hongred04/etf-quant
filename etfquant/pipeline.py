@@ -75,6 +75,34 @@ def load_panel(
     )
 
 
+def latest_data_date(cache_root: str | Path) -> str:
+    """缓存里日线的**众数**最新日期，返回 YYYY-MM-DD。
+
+    实验脚本（grid2 / ablation）原来把 END 写成 "2026-10-23"。数据更新到 11-02 之后，
+    这两张表仍停在 10-23：不仅少了两周的行情，更严重的是它们比引用了新回测器的
+    perf_main.csv 更早生成——同一页上「完整模型 17.3%」对着 KPI 卡片的 12.4%，
+    读者会以为是两个策略。日期必须从数据反推。
+
+    取众数而不是最大值：单只标的停牌或补数据滞后会把 max 带偏，而绝大多数标的
+    的最后一根日线才是面板真正的截止日。
+    """
+    root = Path(cache_root)
+    dirs = [root / "kline_qfq", root / "kline"] if (root / "kline_qfq").exists() else [root]
+    vals: list[str] = []
+    for d in dirs:
+        for fp in d.glob("*.csv"):
+            try:
+                # 只读最后一行的 date 列，避免把 260 只的完整日线读进内存
+                tail = pd.read_csv(fp, usecols=["date"]).tail(1)
+            except (OSError, ValueError, pd.errors.EmptyDataError):
+                continue
+            if len(tail):
+                vals.append(str(tail["date"].iloc[0])[:10])
+    if not vals:
+        raise RuntimeError(f"{cache_root} 下没有可用的日线缓存，请先运行 scripts/download_history.py")
+    return max(set(vals), key=vals.count)
+
+
 def benchmark_series(close: pd.DataFrame, ticker: str = "sh510300") -> pd.Series:
     """基准净值（归一到 1）。缺省时退回宽基等权。"""
     if ticker in close.columns:

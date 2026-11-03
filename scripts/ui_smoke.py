@@ -49,12 +49,27 @@ CASES = [
     ("portfolio", "/#portfolio", 1280, 900, False),
     ("myholdings", "/#myholdings", 1280, 900, False),
     ("strategy", "/#strategy", 1280, 900, False),
+    # research 页长期没进用例表：它恰恰是改动最多、硬编码数字最多的一页。
+    # 12 个用例全绿时，这一页可能整块是旧数据，冒烟发现不了。
+    ("research", "/#research", 1280, 900, False),
     ("data", "/#data", 1280, 900, False),
     ("narrow-overview", "/#overview", 430, 820, False),
     ("narrow-signal", "/#signal", 430, 820, False),
     ("narrow-track", "/#track", 430, 820, False),
+    ("narrow-strategy", "/#strategy", 430, 820, False),
+    ("narrow-research", "/#research", 430, 820, False),
     ("kline", "/?kline=sh516620&theme=dark", 1180, 860, True),
     ("narrow-kline", "/?kline=sh516620&theme=dark", 430, 820, True),
+]
+
+# 失效文案黑名单：修完回测记账（隔夜跳空漏乘净值）后，全样本年化从 17% 级降到 12% 级，
+# 这些数字在任何页面出现都说明还有一处没改过来。只检"带小数点的整串"，
+# 避免误伤 17.4% 之外的正常数字。
+# 只放整句短语：裸数字会撞上真实行情（第一版写 "15.8%" 就误报了地产 ETF 权重）。
+STALE_TEXTS = [
+    "17.7% vs 纯动量 23.9%", "1/σ 加权 22.6%", "Top5 分散仅 15.8%",
+    "12.5% → 14.7%", "累计超额仅 +0.9pp", "年化从 12.8% 掉到 6.9%",
+    "组合卡玛有 88% 优于纯卫星", "对外口径 11%~13%",
 ]
 
 
@@ -135,8 +150,13 @@ def check(case, probe: dict | None, expect_kline: bool) -> list[str]:
         bad.append(f"{name}: 横向溢出（scrollWidth {probe.get('sw')} > {probe.get('vw')}）")
     if probe.get("empty"):
         bad.append(f"{name}: 正文为空")
+    if probe.get("failed"):
+        bad.append(f"{name}: 页面渲染失败 → {probe['failed']}")
     if probe.get("badText"):
         bad.append(f"{name}: 界面上出现 NaN/undefined/Infinity")
+    stale = probe.get("stale") or []
+    if stale:
+        bad.append(f"{name}: 界面残留旧口径数字 {stale}（回测记账已修，这些数已失效）")
     if bool(probe.get("kline")) != expect_kline:
         bad.append(f"{name}: K 线弹窗状态异常（期望 {expect_kline}）")
     return bad

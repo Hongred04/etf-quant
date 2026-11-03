@@ -19,10 +19,13 @@ sys.path.insert(0, str(ROOT))
 
 from etfquant import metrics
 from etfquant.backtest import Backtester
-from etfquant.pipeline import benchmark_series, load_panel
+from etfquant.pipeline import benchmark_series, latest_data_date, load_panel
 from etfquant.strategy import TrendGatedAdaptive
 
-PANEL_START, START, END = "2018-01-02", "2019-01-02", "2026-10-23"
+PANEL_START, START = "2018-01-02", "2019-01-02"
+# 截止日从缓存反推，不写死：写死会让表格停在旧数据上，
+# 而 perf_main.csv 用的是"数据最后一天"，同页对照时两套日期自相矛盾。
+END = latest_data_date(ROOT / "data" / "cache")
 
 # 朴素起点：短期动量打分、无任何过滤、等权、始终满仓、无熔断
 BASE = dict(
@@ -73,7 +76,7 @@ def main() -> None:
     bench = benchmark_series(panel.close, "sh510300")
 
     print("=" * 104)
-    print("增量归因  2019-01-02 ~ 2026-10-23")
+    print(f"增量归因  {START} ~ {END}")
     print("=" * 104)
     print(f"{'配置':<28}{'CAGR':>9}{'Sharpe':>8}{'MaxDD':>9}{'Calmar':>8}{'换手':>7}{'累计':>9}")
     rows = {}

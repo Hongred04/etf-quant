@@ -17,10 +17,13 @@ sys.path.insert(0, str(ROOT))
 
 from etfquant import metrics
 from etfquant.backtest import Backtester
-from etfquant.pipeline import benchmark_series, load_panel
+from etfquant.pipeline import benchmark_series, latest_data_date, load_panel
 from etfquant.strategy import TrendGatedAdaptive
 
-PANEL_START, START, END = "2018-01-02", "2019-01-02", "2026-10-23"
+PANEL_START, START = "2018-01-02", "2019-01-02"
+# 同 grid2：截止日从缓存反推。两轮实验必须与 perf_main.csv 用同一个终点，
+# 否则「完整模型」在消融表里是一套数字、在回测表里是另一套。
+END = latest_data_date(ROOT / "data" / "cache")
 
 CONFIGS: dict[str, dict] = {
     "A. 完整模型(默认)": {},
@@ -54,7 +57,7 @@ def main() -> None:
     bench = benchmark_series(panel.close, "sh510300")
 
     print("=" * 96)
-    print("全样本消融 2019-01-02 ~ 2026-10-23")
+    print(f"全样本消融  {START} ~ {END}")
     print("=" * 96)
     rows = {}
     for name, cfg in CONFIGS.items():
@@ -69,21 +72,15 @@ def main() -> None:
     print("\n" + "=" * 96)
     print("子样本稳健性（完整模型）")
     print("=" * 96)
+    # 只打印、不落盘：页面上「实验三」读的是 grid2.py 产出的 subsample2.csv
+    # （含纯动量对照列，口径更全）。这里原来还写过一份 output/subsample.csv，
+    # 列名不同、没有任何消费方，纯属孤儿产物——留着只会让下一个人读错表。
     subs = [("前段 2019-2022", "2019-01-02", "2022-12-30"), ("后段 2023-2026", "2023-01-03", END)]
-    sub_rows = {}
     for label, s0, s1 in subs:
         r = run(panel, bench, {}, s0, s1)
         b = bench[(bench.index >= pd.Timestamp(s0)) & (bench.index <= pd.Timestamp(s1))]
-        sub_rows[label] = {
-            "策略CAGR": r["年化收益(CAGR)"],
-            "策略Sharpe": r["夏普比率"],
-            "策略MaxDD": r["最大回撤"],
-            "基准CAGR": metrics.cagr(b),
-            "基准MaxDD": metrics.max_drawdown(b),
-        }
         print(f"{label}: 策略 CAGR {r['年化收益(CAGR)']:>7.2%} Sharpe {r['夏普比率']:>5.2f} "
               f"MaxDD {r['最大回撤']:>7.2%} | 基准 CAGR {metrics.cagr(b):>7.2%} MaxDD {metrics.max_drawdown(b):>7.2%}")
-    pd.DataFrame(sub_rows).T.to_csv(ROOT / "output" / "subsample.csv", encoding="utf-8-sig")
 
 
 if __name__ == "__main__":

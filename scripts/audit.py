@@ -387,6 +387,41 @@ def main() -> None:
             ok("README_full 7.10 含生成的诊断表", False,
                "缺 diag 标记，或 diagnostics.json 不完整")
 
+    # README 顶部那张「核心-卫星」对照表是**手写**的（纯 TGAR vs 组合）。
+    # 它不影响任何计算，所以错了也不会有人发现——但只要 core_weight、数据区间
+    # 或回测记账方式一改，README 开口就是四个过期数字。
+    # 这里逐格核对：改完策略却忘了改 README，audit 会拦住。
+    combo_fp = ROOT / "output" / "combo.json"
+    readme_top = ROOT / "README.md"
+    if combo_fp.exists() and readme_top.exists():
+        try:
+            cdoc = _json.loads(combo_fp.read_text(encoding="utf-8")) or {}
+            cfgs = {round(float(r.get("core_weight", -1)), 2): r
+                    for r in (cdoc.get("configs") or [])}
+            cw = 0.5
+            try:
+                _m = _json.loads((ROOT / "output" / "signal_meta.json").read_text(encoding="utf-8"))
+                cw = round(float(_m.get("core_weight") or 0.0), 2)
+            except (OSError, ValueError):
+                pass
+            sat, mix = cfgs.get(0.0), cfgs.get(cw)
+            txt = readme_top.read_text(encoding="utf-8")
+            if sat and mix:
+                # README 用一位小数写这四个数，容差取 0.05pp
+                cells = [
+                    ("纯卫星年化", sat["cagr"], f"{sat['cagr'] * 100:.1f}%"),
+                    ("纯卫星回撤", sat["mdd"], f"{abs(sat['mdd']) * 100:.1f}%"),
+                    ("组合年化", mix["cagr"], f"{mix['cagr'] * 100:.1f}%"),
+                    ("组合回撤", mix["mdd"], f"{abs(mix['mdd']) * 100:.1f}%"),
+                ]
+                miss = [f"{name}={val}" for name, _v, val in cells if val not in txt]
+                ok("README 顶部的核心-卫星对照表与 combo.json 一致", not miss,
+                   "过期：" + "、".join(miss) + f"（当前 core_weight={cw}，改 README 或重跑 combo_report）",
+                   f"4 个格子全部对上（core_weight={cw}，"
+                   f"组合 {mix['cagr'] * 100:.1f}% / {mix['mdd'] * 100:.1f}%）")
+        except (OSError, _json.JSONDecodeError, KeyError, TypeError) as exc:
+            ok("README 组合表可核对", False, str(exc)[:80])
+
     print("\n" + "=" * 78)
     # ------------------------------------------------------------------ K
     print("\n" + "=" * 78)

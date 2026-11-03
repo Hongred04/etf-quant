@@ -443,6 +443,29 @@
   }
 
   /* ------------------------------------------------------- 页面：概览 */
+  /**
+   * 超额收益的时间分布。分段边界固定，数值由 /api/overview 的 excess_split 现算。
+   * 这段话原本是写死的（"2019—2023 累计超额 +0.9pp、2019—2021 跑输 9pp"），
+   * 修好回测的隔夜跳空记账后，前段实际跑输 50 多个百分点——结论方向没变，
+   * 但量级差了一个数量级，写死就必然说错。
+   */
+  function excessNote(d) {
+    const seg = d.excess_split;
+    if (!Array.isArray(seg) || !seg.length) {
+      return `超额收益在时间上分布不均，单个区间跑赢或跑输都不构成结论。详见「效果验证」。`;
+    }
+    const pp = (v) => `${v >= 0 ? "+" : "−"}${Math.abs(v * 100).toFixed(0)}pp`;
+    const worst = seg.reduce((a, b) => (a.excess < b.excess ? a : b));
+    const best = seg.reduce((a, b) => (a.excess > b.excess ? a : b));
+    const pos = seg.filter((s) => s.excess > 0).length;
+    const list = seg.map((s) => `${s.label} ${pp(s.excess)}`).join(" · ");
+    return `超额收益<b>不是全天候的</b>：${list}。
+      <b>${worst.label} 跑输基准 ${Math.abs(worst.excess * 100).toFixed(0)}pp</b>
+      （结构性牛市里闸门降仓的固有代价），超额几乎全部来自 <b>${best.label}</b>。
+      三段里有 ${pos} 段为正，所以这是一个「震荡与熊市抗跌、牛市跟涨不足」的模型，
+      不能当作任何行情都能跑赢。详见「效果验证」。`;
+  }
+
   function renderOverview() {
     const d = state.overview;
     if (!d || d.error) {
@@ -546,7 +569,7 @@
             ? `<br>大号数字是<b>样本内</b>结果（参数在同一段历史上挑过），可对外引用的预期是 <b>${exp.label}</b>——`
               + `锚点 ${pct(exp.anchor, 1)} 来自「每 6 个月重挑一次参数」的纯样本外年化。`
               + (exp.alpha_t == null ? ""
-                : `<br>但注意：这条策略的 <b>α 只有 ${pct(exp.alpha_ann, 1)}</b>，`
+                : `<br>但注意：卫星腿的 <b>α 只有 ${pct(exp.alpha_ann, 1)}</b>，`
                   + `HAC t 值 ${num(exp.alpha_t, 2)}，小于 2 就是与 0 在统计上分不开——`
                   + `换句话说，${exp.label} 是「折价后的点估计」，不是保证。详见 README 7.10。`)
             : "") +
@@ -570,8 +593,8 @@
       <div class="card reveal">
         <div class="card-head">
           <div>
-            <div class="card-title">净值曲线</div>
-            <div class="card-sub">${m.start} — ${m.end} · ${m.days} 个交易日 · 成本 0.10%/次 · 对数刻度</div>
+            <div class="card-title">卫星腿净值曲线</div>
+            <div class="card-sub">${m.start} — ${m.end} · ${m.days} 个交易日 · 成本 0.10%/次 · 对数刻度 · 不含核心腿</div>
           </div>
           <div class="legend" id="navLegend"></div>
         </div>
@@ -581,8 +604,8 @@
       <div class="grid-2 mt">
         <div class="card reveal">
           <div class="card-head">
-            <div><div class="card-title">回撤曲线</div>
-            <div class="card-sub">红色本策略 · 虚线沪深300${uwMax ? " · " + uwMax : ""}</div></div>
+            <div><div class="card-title">卫星腿回撤曲线</div>
+            <div class="card-sub">红色卫星腿 · 虚线沪深300${uwMax ? " · " + uwMax : ""}</div></div>
             ${ddNow == null ? "" : `<div class="dd-now">
               <b>${pct(ddNow, 1)}</b><span>当前回撤</span>
               ${uwNow ? `<em>${uwNow}</em>` : ""}</div>`}
@@ -593,7 +616,7 @@
         <div class="card reveal">
           <div class="card-head">
             <div><div class="card-title">年度收益</div>
-            <div class="card-sub">柱上为该年 TGAR 收益</div></div>
+            <div class="card-sub">柱上为该年卫星腿收益</div></div>
             <div class="legend" id="yearLegend"></div>
           </div>
           <div class="card-body"><div class="bars" id="yearBars"></div></div>
@@ -606,9 +629,7 @@
 
       <div class="note mt">
         <svg viewBox="0 0 24 24" fill="none"><path d="M12 8.5v5M12 16.6v.1" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/></svg>
-        <div>超额收益<b>几乎全部来自 2024 年以后</b>：2019—2023 累计超额仅 +0.9pp，
-        其中 <b>2019—2021 段跑输基准约 9pp</b>（结构性牛市里闸门降仓的固有代价），2022—2024 段才明显领先。
-        这是一个「震荡与熊市抗跌、牛市跟涨不足」的模型，不是全天候跑赢。详见「效果验证」。</div>
+        <div>${excessNote(d)}</div>
       </div>
     `;
 
@@ -645,7 +666,7 @@
     const ddBench = (d.drawdown.bench || []).map(([dt, v]) => [dt, v / 100]);
     lineChart($("#ddChart"), {
       series: [
-        { name: "TGAR 回撤", color: cssVar("--chart-up"), data: ddSelf, area: true, width: 1.4 },
+        { name: "卫星腿回撤", color: cssVar("--chart-up"), data: ddSelf, area: true, width: 1.4 },
         { name: "基准回撤", color: cssVar("--chart-bench"), data: ddBench, width: 1.2, dash: [3, 3] },
       ],
       height: 196,
@@ -1579,16 +1600,19 @@
 
     view.innerHTML = `
       <div class="dateline">${dateLine}</div>
+      <div class="note"><div><b>这是卫星腿单独的模拟账户</b>，不含 50% 红利低波核心腿。
+        下面 4 个持仓与「调仓清单」不一致是正常的：清单是<b>今日信号</b>（含核心腿），
+        这里是<b>回测最后一日</b>的卫星仓位。你的实际组合 = 核心 50% + 这里的卫星腿 50%。</div></div>
       <div class="kpi-grid">
         ${kpiCard("当前持仓", d.current.length, `平均 ${s.avg_holdings} 只`
           + (state.status && state.status.stale ? `（数据落后 ${state.status.behind_sessions} 天）`
             : state.status && state.status.bt_stale ? "（回测未跟上行情）" : ""), "",
-          "回测最后一日的实际持仓数量。策略目标 3 只，加上防守债券后通常为 3~4 只。")}
+          "卫星腿回测最后一日的持仓数量。目标 3 只，加上防守债券后通常为 3~4 只。")}
         ${kpiCard("累计调仓", s.rebalances, "次 · 每 5 个交易日一次", "",
           "回测期内真正发生交易的次数。5 个交易日调仓一次的频率，7.5 年约 375 次。")}
         ${kpiCard("年均换手", s.avg_turnover.toFixed(1) + " 倍",
           `单边 · 每次约 ${(s.per_reb_turn * 100).toFixed(0)}%`, "",
-          "一年内大约换掉几倍仓位。数值越高，交易越频繁、成本越高。本策略每年换手约 24 倍。")}
+          "卫星腿一年内大约换掉几倍仓位。数值越高，交易越频繁、成本越高，约 24 倍。")}
         ${kpiCard("年均交易成本", pct(s.cost_annual), "按单边 0.10% 计", "down",
           "换手带来的摩擦成本，直接从净值里扣除。这是高换手策略最真实的代价。")}
       </div>
@@ -1596,7 +1620,7 @@
       <div class="card reveal">
         <div class="card-head">
           <div>
-            <div class="card-title">模拟账户最后一天的持仓</div>
+            <div class="card-title">卫星腿 · 回测最后一天的持仓</div>
             <div class="card-sub">截至 ${esc(d.as_of)} · 右侧为持有期涨幅</div>
           </div>
           <span class="tag">共 ${(totalW * 100).toFixed(0)}% 仓位</span>
@@ -1627,7 +1651,7 @@
       <div class="note mt">
         <svg viewBox="0 0 24 24" fill="none"><path d="M12 8.5v5M12 16.6v.1" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/></svg>
         <div>年均换手 <b>${s.avg_turnover.toFixed(1)} 倍</b>意味着每年要付出约 <b>${pct(s.cost_annual)}</b> 的交易成本
-        （${s.avg_turnover.toFixed(1)} × 2 × ${(s.fee_side * 100).toFixed(2)}%）。这是本策略收益的主要漏损来源——若能把换手降低一半，
+        （${s.avg_turnover.toFixed(1)} × 2 × ${(s.fee_side * 100).toFixed(2)}%）。这是卫星腿收益的主要漏损来源——若能把换手降低一半，
         每年可多留约 ${pct(s.cost_annual / 2)} 的收益。</div>
       </div>
     `;
@@ -1635,20 +1659,37 @@
 
   /* ------------------------------------------------------- 页面：策略 */
   function renderStrategy() {
+    // 组合口径的数字全部来自 /api/overview 的 combo 段（output/combo.json 现算），
+    // 不在前端写死。原来这里写着"年化 12.0%、回撤 −19.4%、78 个窗口 88% 更优"，
+    // 只要 core_weight、数据区间或回测记账方式一变，页面就开始说假话。
+    const cb = state.overview && state.overview.combo;
+    const cw = (cb && cb.core_weight != null) ? cb.core_weight : 0.5;
+    const CORE_CODES = (cb && cb.core_codes && cb.core_codes.length)
+      ? cb.core_codes.map((c) => String(c).replace(/^(sh|sz)/, ""))
+      : ["512890", "515450", "515300", "159307"];
+    const sat = cb && cb.satellite, act = cb && cb.active, roll = cb && cb.rolling;
+    const comboEffect = (act && sat)
+      ? `效果：年化 ${pct(act.cagr, 1)}、最大回撤 ${pct(act.mdd, 1)}`
+        + `（纯卫星是 ${pct(sat.cagr, 1)} / ${pct(sat.mdd, 1)}）`
+        + (roll ? `\n       ${roll.windows} 个滚动 12 个月窗口里，组合卡玛有 ${pct(roll.share, 0)} 优于纯卫星` : "")
+      : "效果：缺少 output/combo.json，请先跑一次 scripts/combo_report.py";
+    const corrTxt = (cb && cb.corr != null) ? cb.corr.toFixed(2) : "—";
+
+    // 实验结论（brief）在下面的层说明里也要引用，必须在 layers 之前取到。
+    const b = (state.research && state.research.brief) || null;
     const layers = [
       {
-        t: "先分两笔钱：核心 50% + 卫星 50%",
+        t: `先分两笔钱：核心 ${pct(cw, 0)} + 卫星 ${pct(1 - cw, 0)}`,
         d: "这是 2026-11 起的默认配置。原因是纯动量策略的最大回撤是 −35%，"
           + "而所有止损、熔断、降仓位的办法都只能「用收益换波动」——"
-          + "降到同样的回撤，年化从 12.8% 掉到 6.9%。真正有效的是加一笔走势不同步的钱："
-          + "红利低波与动量腿的日收益相关性只有 0.23。",
+          + "降到同样的回撤，年化要掉到个位数。真正有效的是加一笔走势不同步的钱："
+          + "红利低波与动量腿的日收益相关性只有 " + corrTxt + "。",
         c: [
-          "核心 50% → 4 只红利低波 ETF 等权（512890 / 515450 / 515300 / 159307）",
-          "              不择时、每期等权重置，与卫星腿相关性 0.23",
-          "卫星 50% → 下面第一到第五步的动量轮动",
+          `核心 ${pct(cw, 0)} → 4 只红利低波 ETF 等权（${CORE_CODES.join(" / ")}）`,
+          "              不择时、每期等权重置，与卫星腿低相关",
+          `卫星 ${pct(1 - cw, 0)} → 下面第一到第五步的动量轮动`,
           "",
-          "效果：年化 12.0%、最大回撤 −19.4%（纯卫星是 12.8% / −35.1%）",
-          "       78 个滚动 12 个月窗口里，组合卡玛有 88% 优于纯卫星",
+          comboEffect,
         ].join("\n"),
       },
       {
@@ -1664,7 +1705,10 @@
       {
         t: "卫星 · 第三步：给剩下的打分，看谁最强",
         d: "只用一个指标排序：近 20 个交易日的涨幅。但故意去掉最近 5 个交易日，因为短期急涨往往随后回吐，去掉后更能反映真实强度。",
-        c: "按「近20日涨幅（剔除最近5日）」从高到低排序\n\n说明：实验证明加入中期动量、低波动等因子反而更差，\n      因为 A 股行业轮动周期只有 3~8 周，慢因子会错过行情。",
+        c: "按「近20日涨幅（剔除最近5日）」从高到低排序\n\n"
+          + "说明：加入中期动量、低波动等因子反而更差（"
+          + ((b && b.multi) ? `${pct(b.multi.multi_cagr, 1)} vs 纯动量 ${pct(b.multi.pure_cagr, 1)}` : "见「效果验证」")
+          + "），\n      因为 A 股行业轮动周期只有 3~8 周，慢因子会错过行情。",
       },
       {
         t: "卫星 · 第四步：买前 3 名，每只等额",
@@ -1679,9 +1723,9 @@
     ];
 
     const conditions = [
-      ["核心腿", "4 只红利低波 ETF 等权，不择时", "与动量腿相关性仅 0.23"],
+      ["核心腿", `4 只红利低波 ETF 等权，不择时`, `与卫星腿相关性 ${corrTxt}`],
       ["核心腿调仓", "每个调仓日等权重置", "偏离很小，换手近零"],
-      ["卫星腿权重", "占 50%（可调 0~100%）", "决定回撤与收益的取舍"],
+      ["卫星腿权重", `占 ${pct(1 - cw, 0)}（可调 0~100%）`, "决定回撤与收益的取舍"],
       ["标的范围", "沪深 ETF，剔除货币，同指数只留成交额最大者", "避免同质重复暴露"],
       ["上市时长", "≥ 250 个交易日", "因子可算，规避次新炒作"],
       ["流动性", "20 日均成交额 ≥ 2000 万元", "容纳实盘冲击成本"],
@@ -1694,12 +1738,15 @@
       ["调仓", "每 5 交易日，T+1 开盘执行", "匹配轮动周期，规避前视"],
     ];
 
+    const refuted = refutedItems(b);
+    const sens = rebSensitivity(b);
+
     view.innerHTML = `
       <div class="card reveal">
         <div class="card-head">
           <div>
             <div class="card-title">核心-卫星 · 红利低波打底 + 动量轮动进攻</div>
-            <div class="card-sub"></div>
+            <div class="card-sub">下面的比例与效果数字来自当前配置的回测，不是写死的</div>
           </div>
         </div>
         <div class="card-body">
@@ -1730,52 +1777,88 @@
         <div class="card reveal">
           <div class="card-head"><div>
             <div class="card-title">已被证伪的设计</div>
-            <div class="card-sub">经消融验证为负贡献，未启用</div>
+            <div class="card-sub">经消融验证为负贡献，未启用${b ? " · 数字现算" : ""}</div>
           </div></div>
           <div class="card-body" style="padding-top:4px">
-            <div class="layer" style="margin-bottom:8px">
-              <div class="layer-idx" style="color:var(--up);background:rgba(246,70,93,.12)">✕</div>
-              <div><div class="layer-title">组合级回撤熔断</div>
-              <div class="layer-desc">净值自高点回撤 10% 时减半仓。实际在下跌末期减仓形成<b>追跌</b>：
-              CAGR 降 2.4pct，回撤反而恶化 1.3pct。</div></div>
-            </div>
-            <div class="layer" style="margin-bottom:8px">
-              <div class="layer-idx" style="color:var(--up);background:rgba(246,70,93,.12)">✕</div>
-              <div><div class="layer-title">四因子合成打分</div>
-              <div class="layer-desc">R20 + R60 + Sharpe60 + 低波动。A 股 ETF 轮动周期仅 3—8 周，
-              中期动量与低波动因子会<b>系统性低配刚启动的品种</b>：17.7% vs 纯动量 23.9%。</div></div>
-            </div>
-            <div class="layer">
-              <div class="layer-idx" style="color:var(--up);background:rgba(246,70,93,.12)">✕</div>
-              <div><div class="layer-title">波动率倒数加权 / Top5 分散</div>
-              <div class="layer-desc">1/σ 加权 22.6%（等权 23.9%）；Top5 分散仅 15.8%（Top3 23.9%）。
-              过度分散削弱了动量的选股效率。</div></div>
-            </div>
+            ${refuted || '<div class="empty">缺少实验数据，先跑 scripts/ablation.py</div>'}
           </div>
         </div>
 
         <div class="card reveal">
           <div class="card-head"><div>
             <div class="card-title">参数敏感性</div>
-            <div class="card-sub">调仓频率是本策略最脆弱的参数</div>
+            <div class="card-sub">调仓频率是卫星腿最脆弱的参数</div>
           </div></div>
           <div class="card-body" style="padding-top:0">
-            ${[["5 日（默认）", 23.9, 100], ["10 日", 9.2, 38], ["20 日", -0.8, 4]].map(([k, v, w]) => `
-              <div style="padding:9px 0;border-bottom:1px solid rgba(255,255,255,.04)">
+            ${sens.map(([k, v, w]) => `
+              <div style="padding:9px 0;border-bottom:1px solid var(--line-2)">
                 <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:6px">
-                  <span>${k}</span>
-                  <span class="num ${v > 0 ? "up" : "down"}">${v.toFixed(1)}%</span>
+                  <span>${esc(k)}</span>
+                  <span class="num ${v > 0 ? "up" : "down"}">${pct(v, 1)}</span>
                 </div>
                 <div class="wbar"><i style="width:${w}%;background:${v > 0 ? "linear-gradient(90deg,#6d8cff,#35d7e8)" : "#2ebd85"}"></i></div>
               </div>`).join("")}
             <div class="note mt" style="margin-top:14px">
               <svg viewBox="0 0 24 24" fill="none"><path d="M12 8.5v5M12 16.6v.1" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/></svg>
-              <div>调仓延迟一倍的代价是年化收益腰斩。实盘执行纪律比参数微调更重要。</div>
+              <div>调仓延迟一倍的代价是年化近乎腰斩。实盘执行纪律比参数微调更重要。</div>
             </div>
           </div>
         </div>
       </div>
     `;
+  }
+
+  /**
+   * 「已被证伪的设计」。原来这一栏是写死的三条（熔断、四因子、1/σ 与 Top5），
+   * 其中「1/σ 加权更差」在修复隔夜跳空记账之后**已经不成立**——
+   * 新数据里 1/σ 反而比等权高 2pp。所以改成按实验表判断：
+   * 只有确实比完整模型差的才列进来，正贡献的不许硬说成负贡献。
+   */
+  function refutedItems(b) {
+    if (!b || !b.ablation) return "";
+    const full = b.ablation.full;
+    if (!full) return "";
+    const card = (title, desc) => `<div class="layer" style="margin-bottom:8px">
+      <div class="layer-idx" style="color:var(--up);background:rgba(246,70,93,.12)">✕</div>
+      <div><div class="layer-title">${esc(title)}</div>
+      <div class="layer-desc">${desc}</div></div>
+    </div>`;
+    const out = [];
+    const dd = b.ablation.dd_brake;
+    if (dd && dd.cagr < full.cagr) {
+      out.push(card("组合级回撤熔断",
+        `净值自高点回撤 10% 时减半仓。实际在下跌末期减仓形成<b>追跌</b>：`
+        + `年化 ${pct(full.cagr, 1)} → ${pct(dd.cagr, 1)}（${((dd.cagr - full.cagr) * 100).toFixed(1)}pp），`
+        + `回撤 ${pct(full.mdd, 1)} → ${pct(dd.mdd, 1)}，两头都更差。`));
+    }
+    if (b.multi && b.multi.multi_cagr < b.multi.pure_cagr) {
+      out.push(card("四因子合成打分",
+        `R20 + R60 + Sharpe60 + 低波动。A 股 ETF 轮动周期仅 3—8 周，`
+        + `中期动量与低波动因子会<b>系统性低配刚启动的品种</b>：`
+        + `${pct(b.multi.multi_cagr, 1)} vs 纯动量 ${pct(b.multi.pure_cagr, 1)}。`));
+    }
+    if (b.top5 && b.top5.top5_cagr < b.top5.final_cagr) {
+      out.push(card("Top5 分散",
+        `持仓从 3 只扩到 5 只后年化 ${pct(b.top5.top5_cagr, 1)}（默认 ${pct(b.top5.final_cagr, 1)}）。`
+        + `过度分散削弱了动量的选股效率——最强的那只被稀释了。`));
+    }
+    // 实测为**正**贡献的方案不列在这里（1/σ 加权就是这种情况），
+    // 但也不静默丢掉：它没进默认配置的原因在「效果验证」里说明。
+    return out.join("");
+  }
+
+  /** 调仓频率敏感性。原来写死 23.9 / 9.2 / −0.8，改为从消融表取。 */
+  function rebSensitivity(b, C = "年化收益(CAGR)") {
+    const a = (b && b.ablation) || null;
+    if (!a || !a.full) return [];
+    const full = a.full.cagr;
+    const rows = [
+      ["5 日（默认）", full],
+      ["10 日", a.reb10 ? a.reb10.cagr : null],
+      ["20 日", a.reb20 ? a.reb20.cagr : null],
+    ].filter(([, v]) => v != null);
+    const hi = Math.max(...rows.map(([, v]) => Math.abs(v)), 0.01);
+    return rows.map(([k, v]) => [k, v, Math.max(4, (Math.abs(v) / hi) * 100)]);
   }
 
   /* ------------------------------------------------------- 页面：实验 */
@@ -1785,6 +1868,13 @@
       view.innerHTML = `<div class="empty">${esc(d?.error || "加载中…")}</div>`;
       return;
     }
+
+    // 「组合口径是 12.0% / −19.4%」这句原来写死在说明里。组合比例一调、
+    // 或回测记账口径一改，它就变成假话。改成从 overview 的 combo 段取。
+    const _cb = state.overview && state.overview.combo;
+    const comboTip = (_cb && _cb.active)
+      ? `（${pct(_cb.active.cagr, 1)} / ${pct(_cb.active.mdd, 1)}）`
+      : "";
 
     const colFmt = (c) => {
       if (/持续/.test(c)) return (v) => ({ text: v == null ? "—" : v.toFixed(0) });
@@ -1830,6 +1920,14 @@
     };
 
     view.innerHTML = `
+      <div class="note">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M12 8.5v5M12 16.6v.1" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/></svg>
+        <div><b>本页全部统计针对卫星腿（TGAR 动量轮动）</b>——PBO、样本外衰减、滚动重挑、
+        对外预期都是它单独的口径，用来回答"这套选股逻辑是不是挑出来的"。
+        核心腿是固定等权的红利低波，没有可调参数，也就没有过拟合问题。
+        <b>组合口径的收益与回撤见「总览」页的配置卡片</b>${comboTip}。</div>
+      </div>
+
       <div class="note">
         <svg viewBox="0 0 24 24" fill="none"><path d="M12 8.5v5M12 16.6v.1" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/></svg>
         <div>做了两轮实验：<b>从复杂模型做减法</b>（模块消融）与<b>从最朴素纯动量做加法</b>（增量归因）。
@@ -1917,48 +2015,93 @@
       <div class="grid-2 mt">
         <div class="card reveal">
           <div class="card-head"><div>
-            <div class="card-title">三条与直觉相反的结论</div>
-            <div class="card-sub"></div>
+            <div class="card-title">与直觉相反的结论</div>
+            <div class="card-sub">全部从上面三张表现算，不另写数字</div>
           </div></div>
           <div class="card-body">
             <ol style="margin:0;padding-left:20px;font-size:12.5px;line-height:1.9;color:var(--txt-2)">
-              <li><b style="color:var(--txt)">多因子合成劣于纯短期动量</b><br>
-              17.7% vs 23.9%。A 股行业轮动周期 3—8 周，中期因子拖累。</li>
-              <li style="margin-top:10px"><b style="color:var(--txt)">回撤熔断是负贡献</b><br>
-              在下跌末期减仓形成追跌，收益降 2.4pct 且回撤未改善。</li>
-              <li style="margin-top:10px"><b style="color:var(--txt)">缓冲带是唯一「免费午餐」</b><br>
-              排名缓冲带同时改善收益与夏普（12.5% → 14.7%）。</li>
+              ${flipPoints(d.brief)}
             </ol>
           </div>
         </div>
         <div class="card reveal">
           <div class="card-head"><div>
             <div class="card-title">超额收益的时间分布</div>
-            <div class="card-sub"></div>
+            <div class="card-sub">相邻两段超额之差就是「这一段值不值得等」</div>
           </div></div>
           <div class="card-body">
             <div style="font-size:12.5px;line-height:2;color:var(--txt-2)">
-              <div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.04)">
-                <span>2019—2022</span>
-                <span><span class="dim">策略</span> <b class="num">11.2%</b>
-                <span class="dim" style="margin-left:8px">基准</span> <b class="num">11.0%</b></span>
-              </div>
-              <div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.04)">
-                <span>2023—2026</span>
-                <span><span class="dim">策略</span> <b class="num up">34.4%</b>
-                <span class="dim" style="margin-left:8px">基准</span> <b class="num">3.6%</b></span>
-              </div>
+              ${(d.excess_split || []).map((s) => `
+                <div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line-2)">
+                  <span>${esc(s.label)}</span>
+                  <span><span class="dim">策略</span> <b class="num ${cls(s.strat)}">${pct(s.strat, 1)}</b>
+                  <span class="dim" style="margin-left:8px">基准</span> <b class="num ${cls(s.bench)}">${pct(s.bench, 1)}</b>
+                  <span class="dim" style="margin-left:8px">超额</span> <b class="num ${cls(s.excess)}">${s.excess >= 0 ? "+" : ""}${(s.excess * 100).toFixed(1)}pp</b></span>
+                </div>`).join("") || '<div class="empty">缺少分段数据</div>'}
             </div>
             <div class="note mt" style="margin-top:16px">
               <svg viewBox="0 0 24 24" fill="none"><path d="M12 8.5v5M12 16.6v.1" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/></svg>
-              <div>前段并非「持平」：<b>2019—2021 跑输基准约 9pp</b>（牛市里闸门降仓的代价），
-              2022—2024 才转为领先，超额几乎全部来自 2024 年以后。
-              不做「全天候跑赢」的假设，是使用该策略的前提。</div>
+              <div>前段跑输不是计价误差，而是<b>结构性牛市里闸门主动降仓的代价</b>：
+              只做到半仓，涨得比满仓慢。不做「全天候跑赢」的假设，是使用该策略的前提。</div>
             </div>
           </div>
         </div>
       </div>
     `;
+  }
+
+  /**
+   * 「与直觉相反的结论」。原来这段写死了「多因子 17.7% vs 纯动量 23.9%」
+   * 「缓冲带 12.5% → 14.7%」——都是修复隔夜跳空记账之前的数。
+   * 现在按 brief 里现算的 delta 生成，并且**只在确实反直觉时才列出**：
+   * 数据变了而结论也变了的话，页面应当跟着不说话，而不是坚持旧叙事。
+   */
+  function flipPoints(b) {
+    if (!b) return '<li class="dim">缺少实验数据，先跑 scripts/grid2.py 与 scripts/ablation.py</li>';
+    const items = [];
+    const pctD = (a, c) => `${pct(a, 1)} vs ${pct(c, 1)}`;
+
+    if (b.multi && b.multi.multi_cagr < b.multi.pure_cagr) {
+      items.push([`多因子合成劣于纯短期动量`,
+        `${pctD(b.multi.multi_cagr, b.multi.pure_cagr)}。A 股行业轮动周期 3—8 周，中期因子拖累。`]);
+    }
+    if (b.ablation?.dd_brake && b.ablation.full
+        && b.ablation.dd_brake.cagr < b.ablation.full.cagr) {
+      const dC = (b.ablation.dd_brake.cagr - b.ablation.full.cagr) * 100;
+      items.push([`回撤熔断是负贡献`,
+        `在下跌末期减仓形成追跌：收益 ${dC.toFixed(1)}pp，回撤反而从 `
+        + `${pct(b.ablation.full.mdd, 1)} 恶化到 ${pct(b.ablation.dd_brake.mdd, 1)}。`]);
+    }
+    if (b.buffer && b.buffer.after_cagr > b.buffer.before_cagr) {
+      items.push([`缓冲带是唯一「免费午餐」`,
+        `排名缓冲带同时改善收益与夏普（${pctD(b.buffer.before_cagr, b.buffer.after_cagr)}），`
+        + `换手还降了——它只是「别急着卖」，不是新因子。`]);
+    }
+    if (b.ablation?.inv_vol && b.ablation.full
+        && b.ablation.inv_vol.cagr > b.ablation.full.cagr) {
+      items.push([`波动率倒数加权其实比等权好`,
+        `${pct(b.ablation.inv_vol.cagr, 1)} vs 等权 ${pct(b.ablation.full.cagr, 1)}，`
+        + `夏普 ${num(b.ablation.inv_vol.sharpe)} vs ${num(b.ablation.full.sharpe)}。`
+        + `这条没进默认配置，原因是另一轮实验里它的优势不稳（见实验一第 9 步），`
+        + `属于「看起来更优但换一段行情就翻转」的参数，不作为结论。`]);
+    }
+    if (b.ablation?.trend && b.ablation.full && b.ablation.trend.cagr > b.ablation.full.cagr) {
+      items.push([`MA60 趋势过滤是净拖累`,
+        `关掉它年化 ${pctD(b.ablation.full.cagr, b.ablation.trend.cagr)}，回撤 ${pct(b.ablation.full.mdd, 1)} → `
+        + `${pct(b.ablation.trend.mdd, 1)}。它挡掉的上涨比挡掉的下跌多，但确实压住了回撤——`
+        + `保留它是为了波动可控，不是为了收益。`]);
+    }
+    if (b.ablation?.reb20 && b.ablation.full && b.ablation.reb20.cagr < b.ablation.full.cagr * 0.75) {
+      items.push([`调仓频率是最脆弱的参数`,
+        `20 日调仓只有 ${pct(b.ablation.reb20.cagr, 1)}（${pct(b.ablation.full.cagr, 1)}）。`
+        + `轮动周期只有 3—8 周，延迟一倍等于错过整段行情。`]);
+    }
+    if (!items.length) {
+      return '<li class="dim">当前数据下没有出现方向明确的「反直觉」结论——'
+        + '各模块的贡献都符合预期，或者互相抵消。</li>';
+    }
+    return items.map(([h, t], i) => `<li${i ? ' style="margin-top:10px"' : ""}>`
+      + `<b style="color:var(--txt)">${esc(h)}</b><br>${esc(t)}</li>`).join("");
   }
 
   /* ------------------------------------------------------- 页面：数据 */
@@ -2036,10 +2179,11 @@
           </div></div>
           <div class="card-body">
             ${[
-              ["refresh", "更新行情并重算（推荐）", "依次跑：更新行情 → 重跑回测 → 生成信号，约 150 秒"],
+              ["refresh", "更新行情并重算（推荐）", "依次跑：更新行情 → 重跑回测 → 生成信号 → 组合指标，约 195 秒"],
               ["universe", "扫描全市场 ETF", "枚举 1.8 万个代码段，约 110 秒，需联网"],
               ["download", "更新历史行情", "259 只 × 8.8 年前复权日线，约 70 秒"],
-              ["backtest", "重跑回测", "四策略全样本回测，约 60 秒"],
+              ["backtest_combo", "重跑回测并更新组合", "四策略全样本回测 + 组合指标重算，约 105 秒"],
+              ["combo", "只重算组合指标", "按当前 core_weight 重跑各档组合回测，约 45 秒"],
               ["test", "运行单元测试", "100 项用例，含无前视偏差与策略开关检验"],
             ].map(([id, t, s]) => `
               <div style="display:flex;align-items:center;gap:12px;padding:11px 0;
@@ -2292,9 +2436,16 @@
         state.portfolio = await api("/api/portfolio");
         renderPortfolio();
       } else if (page === "strategy") {
+        // 这一页要两类数据：组合口径（比例/年化/回撤/相关性）来自 overview，
+        // "已被证伪"与参数敏感性来自 research。缺任何一个都会退化成写死的旧数字，
+        // 所以两个都按需拉：直接输 #strategy 进来时 overview 还没加载过。
+        if (!state.overview) state.overview = await api("/api/overview");
+        if (!state.research) state.research = await api("/api/research");
         renderStrategy();
       } else if (page === "research") {
         if (!state.research) state.research = await api("/api/research");
+        // 顶部要引用组合口径的年化/回撤，直接输 #research 进来时 overview 还没加载
+        if (!state.overview) state.overview = await api("/api/overview");
         renderResearch();
       } else if (page === "data") {
         state.universe = await api("/api/universe");
@@ -2411,7 +2562,7 @@
     if (!el) return;
     /* 只有"会改数据"的任务才值得横幅；跑单元测试这种就别占用页面顶部了，
        顶栏圆环已经在转，要看细节点圆环即可。 */
-    const DATA_ACTIONS = ["refresh", "download", "backtest", "signal"];
+    const DATA_ACTIONS = ["refresh", "download", "backtest", "backtest_combo", "signal", "combo"];
     if (st && st.running && DATA_ACTIONS.includes(st.running.action)) {
       const step = st.running.total_steps > 1 && st.running.step
         ? `（第 ${st.running.step}/${st.running.total_steps} 步）` : "";
@@ -2436,7 +2587,7 @@
         <button class="btn btn-sm" id="bannerBacktest">重跑回测</button>`;
       el.hidden = false;
       const bb = $("#bannerBacktest");
-      if (bb) bb.onclick = () => startTask("backtest", true);
+      if (bb) bb.onclick = () => startTask("backtest_combo", true);
       return;
     }
     if (!st || !st.stale) { el.hidden = true; return; }
@@ -2981,7 +3132,7 @@
 
   $("#btnBacktest").addEventListener("click", (e) => {
     e.currentTarget.disabled = true;
-    runAction("backtest", null);
+    runAction("backtest_combo", null);
   });
 
   /* ------------------------------------------------------- 启动 */
@@ -3011,13 +3162,33 @@
         const text = view ? view.textContent || "" : "";
         const de = document.documentElement;
         const modal = $("#klineModal");
+        /* 陈旧数字检测：修完回测的隔夜跳空记账后，全样本年化从 17% 级降到 12% 级，
+           一批旧结论数字在界面上就不该再出现。把它们放进探针，冒烟脚本才能发现
+           "页面还在讲旧数据"这类回归——这类问题不报错、不溢出、不空白，
+           靠原来的三项检查永远发现不了。
+
+           必须用**整句短语**而不是裸数字：第一版写 "15.8%"，结果在「回测持仓」页
+           命中了地产 ETF 的真实权重 15.8%，冒烟直接误报成回归。
+           一个数字在图上和在正文里是两回事，只有跟着上下文才判得准。 */
+        const STALE = [
+          "17.7% vs 纯动量 23.9%", "1/σ 加权 22.6%", "Top5 分散仅 15.8%",
+          "12.5% → 14.7%", "累计超额仅 +0.9pp", "年化从 12.8% 掉到 6.9%",
+          "组合卡玛有 88% 优于纯卫星", "对外口径 11%~13%",
+        ];
+        const hits = STALE.filter((s) => text.indexOf(s) >= 0);
+        /* 渲染失败的兜底检测。loadPage 会把异常吞成一句"加载失败：xxx"写在正文里，
+           于是控制台没有未捕获错误、正文不空、也没有 NaN——前四项检查全部放过它。
+           「怎么选」页就曾经因为一个未定义变量在这里静默崩掉，冒烟却报 ok。 */
+        const failed = /^加载失败/.test(text.trim()) || /ReferenceError|TypeError|is not defined/.test(text);
         document.title = "UISMOKE " + JSON.stringify({
           page: state.page,
           vw: innerWidth,
           sw: de.scrollWidth,
           overflow: de.scrollWidth > innerWidth + 1,
           empty: !text.trim(),
+          failed: failed ? text.trim().slice(0, 160) : "",
           badText: /NaN|undefined|Infinity/.test(text),
+          stale: hits,
           kline: !!(modal && !modal.hidden),
           errs: (window.__errs || []).slice(0, 6),
         });
