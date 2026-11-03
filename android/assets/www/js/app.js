@@ -965,6 +965,16 @@
       '</dl>' +
     '</section>';
 
+    /* ---- 当前配置：hero 与 KPI 都是卫星腿单独的口径 ---- */
+    var cb = OV.combo;
+    if (cb && cb.active) {
+      html += '<div class="combo-note">' +
+        '<b>当前配置：核心 ' + pct(cb.core_weight, 0) + ' · 卫星 ' + pct(1 - cb.core_weight, 0) + '</b>' +
+        '<span>组合年化 ' + pct(cb.active.cagr) + '、最大回撤 ' + pct(cb.active.mdd) +
+        '（卡玛 ' + num(cb.active.calmar) + '）。上面的收益与回撤是<b>卫星腿单独</b>的回测，' +
+        '你实际持有的是组合，回撤预期看这里。</span></div>';
+    }
+
     /* ---- 周期切换 ---- */
     html += '<div class="mt12"><div class="segmented" id="period">' +
       '<button data-p="all" class="' + (period === "all" ? "is-active" : "") + '">全部</button>' +
