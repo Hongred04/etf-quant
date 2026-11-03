@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import subprocess
 import sys
@@ -134,10 +135,22 @@ def main() -> None:
         for _, r in pool.iterrows()
     }
 
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--quick", action="store_true", help="只跑原来的 5 个时点")
+    ap.add_argument("--step", type=int, default=5, help="抽样间隔（交易日）")
+    args = ap.parse_args()
+
     fails = 0
-    # 抽 5 个不同时点，覆盖不同市场状态（最近、100 天前、200 天前…）
+    # 5 个点对 8 年样本的检出能力太弱：改因子后跑一遍全 PASS，
+    # 不代表第 6 个日期也一致。默认按固定间隔扫全样本，--quick 保留快速版。
     n = len(hist["dates"])
-    points = [n - 1, n - 6, n - 21, n - 61, n - 121]
+    if args.quick:
+        points = [n - 1, n - 6, n - 21, n - 61, n - 121]
+    else:
+        # 手机端只带约 300 天历史，抽样窗口天然受限；前 200 天 MA200 未成形，不比
+        earliest = 200
+        points = list(range(n - 1, earliest - 1, -args.step))
+    print(f"抽样 {len(points)} 个时点（{'快速' if args.quick else f'每 {args.step} 个交易日'}）")
     for t in points:
         py = run_python(hist, t)
         js = run_js(hist, meta, t)
@@ -199,7 +212,7 @@ def main() -> None:
 
     print("\n" + "=" * 78)
     if fails == 0:
-        print("结论：JS 引擎与 Python 引擎完全一致（5 个时点 + 因子抽查）")
+        print(f"结论：JS 引擎与 Python 引擎完全一致（{len(points)} 个时点 + 因子抽查）")
     else:
         print(f"结论：{fails} 处不一致，必须修正后再打包")
     print("=" * 78)

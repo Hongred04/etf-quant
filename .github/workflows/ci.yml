@@ -1,0 +1,25 @@
+# 只跑"不依赖本机数据/浏览器"的检查：
+# 单测覆盖纯函数与契约，audit 校验产物一致性。界面冒烟需要 Edge，留给本地。
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: 单元测试
+        run: python -m pytest tests -q
+      - name: 口径审计
+        run: python scripts/audit.py

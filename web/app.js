@@ -929,6 +929,14 @@
       </tr>`;
 
       const minCash = Math.max(...rows.map((r) => r.lot_cost / (r.share / tw || 1)));
+      if (cash >= 1e7) {
+        /* 容量瓶颈不在选股，而在防御债券腿：城投债/地方债 ADV 仅几十万，
+           却要吃一半仓位。1000 万时约 7% 的建仓要超过 3 天。 */
+        $("#orderFoot").innerHTML += `<tr><td colspan="8" class="lot-gap-row">
+          <span class="up"><b>资金已接近容量上限</b></span>：防御债券腿的 20 日均额只有几十万，
+          1000 万规模时约 7% 的建仓要超过 3 天才完成，1 亿时是 30%。
+          再往上应先替换薄量债券 ETF 并重新回测，否则回测容量假设不成立。</td></tr>`;
+      }
       if (cash > 0 && cash < minCash) {
         $("#orderFoot").innerHTML += `<tr><td colspan="8" style="text-align:left;font-weight:400">
           <span class="up"><b>至少需要 ${fmtMoney(minCash)}</b> 才能每只买满 1 手；当前资金有标的买不进，
@@ -1044,14 +1052,15 @@
             <div><span>判定</span><b>${esc(fwd.verdict)}</b></div>
           </div>
           ${fid.length ? `<div class="table-wrap"><table>
-            <thead><tr><th style="text-align:left">信号日</th><th>持仓（live/回测）</th><th>重合</th><th>权重 L1</th><th>最大偏差</th><th>结论</th></tr></thead>
+            <thead><tr><th style="text-align:left">信号日</th><th>持仓（live/回测）</th><th>重合</th><th>权重 L1</th><th>最大偏差</th><th>归档价偏差</th><th>结论</th></tr></thead>
             <tbody>${fid.map((r) => `<tr>
               <td style="text-align:left" class="mono">${esc(r.signal_date)}</td>
               <td>${r.n_live} / ${r.n_backtest}</td>
               <td>${r.overlap} 只</td>
               <td>${(r.l1 * 100).toFixed(2)}pp</td>
               <td>${(r.max_diff * 100).toFixed(2)}pp</td>
-              <td>${r.match ? '<span class="down">一致</span>' : '<span class="up">不一致</span>'}</td>
+              <td class="${r.price_stale ? "up" : "dim"}">${r.price_diff == null ? "—" : `${(r.price_diff * 100).toFixed(2)}%`}</td>
+              <td>${r.match && !r.price_stale ? '<span class="down">一致</span>' : '<span class="up">不一致</span>'}</td>
             </tr>`).join("")}</tbody>
           </table></div>` : '<div class="empty">还没有 live 归档，运行一次「生成选股信号」后开始记录。</div>'}
           ${(fwd.live_executed ?? 0) < (fwd.need || 8)
@@ -2236,8 +2245,26 @@
         try { state.mobile = await api("/api/mobile/info"); } catch (e) { state.mobile = null; }
         renderData();
       }
+      guardFrozen();
     } catch (e) {
       view.innerHTML = `<div class="empty">加载失败：${esc(e.message)}</div>`;
+    }
+  }
+
+  /* 便携版只读：把注定失败的按钮关掉，并在页首说明原因。
+     之前它照常显示"更新行情"，点下去必然报"exe 版不含数据管道"——这是 UX 陷阱。 */
+  function guardFrozen() {
+    if (!state.status || !state.status.frozen) return;
+    $$("[data-run], #refreshData, #btnBacktest").forEach((b) => {
+      b.disabled = true;
+      b.title = "便携版不含数据管道，请用源码版更新";
+    });
+    const b = $("#bannerUpdate");
+    if (b) { b.disabled = true; b.textContent = "便携版不可更新"; }
+    if (!view.querySelector(".frozen-note")) {
+      const div = el(`<div class="note frozen-note"><b>便携版只读</b>：可以看清单、看 K 线，`
+        + `但不能更新行情或重跑回测。需要更新请用源码版（<code>启动.bat</code>）。</div>`);
+      view.prepend(div);
     }
   }
 

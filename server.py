@@ -54,6 +54,8 @@ except ModuleNotFoundError as exc:  # noqa: PERF203
 
 from etfquant import holdings as H
 from etfquant import metrics as M
+from etfquant.io_utils import atomic_write_text
+from etfquant.io_utils import atomic_write_text
 
 if getattr(sys, "frozen", False):
     # PyInstaller 打包版（dist/etf-quant.exe）：
@@ -105,6 +107,8 @@ ACTIONS: dict[str, dict] = {
 # 并发执行会让"生成信号"读到"运行回测"写了一半的中间态。
 _RUN_LOCK = threading.Lock()
 MAX_TASKS_KEPT = 50
+# 任务日志落盘：之前只存在内存里，服务一重启就全丢，排障只能靠用户截图。
+TASK_LOG_DIR = OUT / "task_logs"
 
 TASKS: dict[str, dict] = {}
 TASK_LOCK = threading.Lock()
@@ -164,6 +168,49 @@ def invalidate_cache() -> None:
     threading.Thread(target=_warm_caches, daemon=True, name="warm-after-update").start()
 
 
+def _append_log(tid: str, line: str) -> None:
+    """写一行日志：内存 + 落盘。落盘失败不影响任务本身。"""
+    with TASK_LOCK:
+        t = TASKS.get(tid)
+        if t is not None:
+            t["log"].append(line)
+    try:
+        TASK_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        with open(TASK_LOG_DIR / f"{tid}.log", "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except OSError:
+        pass
+
+
+def _save_task_meta(tid: str) -> None:
+    with TASK_LOCK:
+        t = TASKS.get(tid)
+        if t is None:
+            return
+        meta = {k: v for k, v in t.items() if k != "log"}
+    try:
+        TASK_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(TASK_LOG_DIR / f"{tid}.json",
+                          json.dumps(meta, ensure_ascii=False, indent=2))
+    except OSError:
+        pass
+
+
+def _load_task_from_disk(tid: str) -> dict | None:
+    """服务重启后按 id 取历史任务：meta 来自 json，日志来自 .log。"""
+    meta_fp = TASK_LOG_DIR / f"{tid}.json"
+    if not meta_fp.exists():
+        return None
+    try:
+        meta = json.loads(meta_fp.read_text(encoding="utf-8"))
+        log_fp = TASK_LOG_DIR / f"{tid}.log"
+        log = log_fp.read_text(encoding="utf-8").splitlines() if log_fp.exists() else []
+    except (OSError, ValueError):
+        return None
+    meta["log"] = log
+    meta["restored"] = True
+    return meta
+
 def start_task(action: str) -> str:
     spec = ACTIONS[action]
     # 组合任务：按顺序跑多个脚本（更新行情 → 重跑回测 → 重算信号）。
@@ -186,6 +233,7 @@ def start_task(action: str) -> str:
             "total_steps": len(steps),
         }
 
+    _save_task_meta(tid)
     env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
 
     def run_one(step_spec: dict, tag: str) -> int:
@@ -193,10 +241,10 @@ def start_task(action: str) -> str:
         if FROZEN:
             # exe 版没有内嵌 Python 解释器可供子进程调用，也不带 scripts/ 源码；
             # 数据管道请用完整源码版（README「快速开始」）。
-            with TASK_LOCK:
-                TASKS[tid]["log"].append(
-                    f"{tag}[exe 版] 这是便携只读控制台，不含数据管道。"
-                    "刷新数据 / 回测请下载完整源码版后运行 python scripts/ 下对应脚本。")
+            _append_log(
+                tid,
+                f"{tag}[exe 版] 这是便携只读控制台，不含数据管道。"
+                "刷新数据 / 回测请下载完整源码版后运行 python scripts/ 下对应脚本。")
             TASKS[tid]["code"] = 2
             TASKS[tid]["status"] = "error"
             TASKS[tid]["duration"] = round(time.time() - TASKS[tid]["started"], 1)
@@ -228,21 +276,19 @@ def start_task(action: str) -> str:
             assert proc.stdout is not None
             try:
                 for line in proc.stdout:
-                    with TASK_LOCK:
-                        TASKS[tid]["log"].append(f"{tag}{line.rstrip()}")
+                    _append_log(tid, f"{tag}{line.rstrip()}")
                 proc.wait()
             finally:
                 watchdog.cancel()
             if timed_out.is_set():
-                with TASK_LOCK:
-                    TASKS[tid]["log"].append(
-                        f"[ERROR] {tag}超过 {step_spec.get('timeout', 900)} 秒未完成，已强制终止"
-                    )
+                _append_log(
+                    tid,
+                    f"[ERROR] {tag}超过 {step_spec.get('timeout', 900)} 秒未完成，已强制终止",
+                )
                 return 124
             return proc.returncode
         except Exception as exc:  # noqa: BLE001
-            with TASK_LOCK:
-                TASKS[tid]["log"].append(f"[ERROR] {tag}{exc}")
+            _append_log(tid, f"[ERROR] {tag}{exc}")
             return 1
 
     def worker() -> None:
@@ -253,12 +299,11 @@ def start_task(action: str) -> str:
                 tag = f"[{i}/{len(steps)}] " if len(steps) > 1 else ""
                 with TASK_LOCK:
                     TASKS[tid]["step"] = i
-                    if tag:
-                        TASKS[tid]["log"].append(f"{tag}开始：{step_spec['label']}")
+                if tag:
+                    _append_log(tid, f"{tag}开始：{step_spec['label']}")
                 code = run_one(step_spec, tag)
                 if code != 0:
-                    with TASK_LOCK:
-                        TASKS[tid]["log"].append(f"{tag}失败（退出码 {code}），后续步骤已跳过")
+                    _append_log(tid, f"{tag}失败（退出码 {code}），后续步骤已跳过")
                     break
         finally:
             with TASK_LOCK:
@@ -270,6 +315,7 @@ def start_task(action: str) -> str:
                 )
                 TASKS[tid]["duration"] = round(time.time() - TASKS[tid]["started"], 1)
                 _prune_tasks()
+            _save_task_meta(tid)
             invalidate_cache()
             _RUN_LOCK.release()
 
@@ -1125,6 +1171,9 @@ def api_status() -> dict:
         "stale": behind > 0,
         "running": running,
         "auto_attempted": attempted,
+        # 便携版（exe）不含数据管道：前端据此隐藏/禁用"更新行情"一类按钮，
+        # 否则用户会点到一个注定失败的动作。
+        "frozen": FROZEN,
         "market_open_hint": "盘中：今日行情需收盘后并入" if intraday else "",
     }
 
@@ -1822,6 +1871,9 @@ class Handler(BaseHTTPRequestHandler):
                 with TASK_LOCK:
                     t = TASKS.get(tid)
                     if not t:
+                        disk = _load_task_from_disk(tid)
+                        if disk is not None:
+                            return self._json(disk)
                         return self._json({"error": "task not found"}, 404)
                     # log 是列表，dict(t) 只是浅拷贝，worker 并发 append 时
                     # 序列化可能读到半更新的内容，这里做一次快照

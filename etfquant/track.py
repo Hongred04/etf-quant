@@ -133,7 +133,8 @@ def period_spans(index: pd.DatetimeIndex, signal_dates: list[pd.Timestamp]) -> l
 
 
 def signal_fidelity(
-    archived: pd.DataFrame, strategy_targets: dict, tol: float = 1e-4
+    archived: pd.DataFrame, strategy_targets: dict, close: pd.DataFrame | None = None,
+    tol: float = 1e-4, price_tol: float = 0.01,
 ) -> list[dict]:
     """逐期比对「live 归档信号」与「回测在同一天给出的目标权重」。
 
@@ -159,6 +160,19 @@ def signal_fidelity(
         codes = set(w_live) | set(w_bt)
         l1 = sum(abs(w_live.get(c, 0.0) - w_bt.get(c, 0.0)) for c in codes) / 2.0
         max_diff = max((abs(w_live.get(c, 0.0) - w_bt.get(c, 0.0)) for c in codes), default=0.0)
+        # 归档价是否等于当日收盘：权重一致但价格陈旧（停牌、数据延迟）时，
+        # 纸上净值的成本口径会悄悄偏离回测，而权重比对看不出来。
+        price_diff = None
+        if close is not None and ts in close.index:
+            row = close.loc[ts]
+            diffs = []
+            for r in grp.itertuples():
+                px = row.get(r.code) if hasattr(row, "get") else None
+                if px is None or pd.isna(px) or float(px) <= 0 or pd.isna(r.ref_price):
+                    continue
+                diffs.append(abs(float(r.ref_price) / float(px) - 1.0))
+            if diffs:
+                price_diff = round(float(max(diffs)), 6)
         out.append({
             "signal_date": ts.strftime("%Y-%m-%d"),
             "n_live": len(w_live),
@@ -167,6 +181,8 @@ def signal_fidelity(
             "l1": round(float(l1), 6),
             "max_diff": round(float(max_diff), 6),
             "match": bool(set(w_live) == set(w_bt) and max_diff <= tol),
+            "price_diff": price_diff,
+            "price_stale": bool(price_diff is not None and price_diff > price_tol),
         })
     return out
 
@@ -247,7 +263,7 @@ def build_track(panel, strategy_targets: dict, archived: pd.DataFrame) -> dict:
 
     # 前向验证：live 期从首期执行日到数据末日的偏差，与回填期分开算。
     # 全样本的 paper-vs-backtest 在回填段按构造恒等，把它算进"偏差"会稀释问题。
-    fidelity = signal_fidelity(archived, strategy_targets)
+    fidelity = signal_fidelity(archived, strategy_targets, panel.close)
     live_all = [p for p in periods if p.get("source") == "live"]
     live_exec = [p["exec_date"] for p in live_all if p.get("exec_date")]
     fwd = {

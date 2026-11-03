@@ -1030,3 +1030,21 @@ table.tbl tr.is-hl td { background: var(--accent-soft); }
     backdrop-filter: none;
   }
 }
+
+/* 数据缺口警告：这是"结果不可信"级别的提示，不能做成普通 toast */
+.gapwarn {
+  margin: 12px 14px 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(246, 70, 93, 0.45);
+  background: rgba(246, 70, 93, 0.10);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.gapwarn b { font-size: 13px; color: var(--up); }
+.gapwarn span { font-size: 11.5px; line-height: 1.7; color: var(--txt-2); }
+
+/* 可点开 K 线的标的名称 */
+.kopen { cursor: pointer; }
+.kopen:active { color: var(--accent); }

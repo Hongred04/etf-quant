@@ -651,6 +651,16 @@
          只补到这里为止，不做无限回溯——回补超过 40 天意义不大，
          那种情况下直接更新 APK 更省事。 */
       var needBackfill = gapDays > 1 && gapDays <= 40;
+      if (gapDays > 40) {
+        /* 超过上限时**什么都不能写**：
+           只写当天一根 bar 会在序列中间留一个空洞，而本地引擎对收盘价做 ffill，
+           R20/R60 会把空洞当成"横盘"算进去——选出来的标的是错的，界面却看不出来。
+           宁可保留内置信号（至少口径自洽），并显式告诉用户去更新 APK。 */
+        GAP.days = gapDays;
+        if (current === "today" || current === "overview") render();
+        throw new Error("内置数据缺口 " + gapDays + " 天，已跳过重算");
+      }
+      GAP.days = 0;
       var backfill = function () {
         if (!needBackfill) return Promise.resolve();
         var startD = new Date(lastDate + "T00:00:00");
@@ -1167,6 +1177,130 @@
     return html;
   }
 
+
+  /* ------------------------------------------------------------ 手机端 K 线 */
+  /* 数据按需向行情源取一次（日线 120 根），不进 data.js：
+     否则 APK 要多带几 MB，而看单只标的的频率并不高。 */
+  function fetchDaily(code, n) {
+    var url = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=" +
+      code + ",day,,," + n + ",qfq";
+    return getText(url, "utf-8").then(function (txt) {
+      var j = JSON.parse(txt);
+      var d = j && j.data && j.data[code];
+      if (!d) return [];
+      var rows = d.qfqday || d.day || [];
+      return rows.map(function (r) {
+        return { d: r[0], o: +r[1], c: +r[2], h: +r[3], l: +r[4], v: +(r[5] || 0) };
+      }).filter(function (r) { return isNum(r.c) && r.c > 0; });
+    });
+  }
+
+  function drawCandles(canvas, rows) {
+    if (!canvas || !rows.length) return;
+    var dpr = window.devicePixelRatio || 1;
+    var w = canvas.parentElement.clientWidth || 320;
+    var h = 300;
+    canvas.style.height = h + "px";
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    var ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+
+    var css = getComputedStyle(document.documentElement);
+    var up = css.getPropertyValue("--up").trim() || "#f6465d";
+    var down = css.getPropertyValue("--down").trim() || "#2ebd85";
+    var txt3 = css.getPropertyValue("--txt-3").trim() || "#7d879a";
+    var line = css.getPropertyValue("--line").trim() || "#e3e7ef";
+
+    var PAD = { l: 6, r: 44, t: 10, b: 18 };
+    var volH = 54, gap = 12;
+    var priceH = h - PAD.t - PAD.b - volH - gap;
+    var n = rows.length, step = (w - PAD.l - PAD.r) / n;
+    var bw = Math.max(1, Math.min(7, step * 0.66));
+
+    var lo = Infinity, hi = -Infinity, vmax = 0;
+    rows.forEach(function (r) {
+      lo = Math.min(lo, r.l); hi = Math.max(hi, r.h);
+      vmax = Math.max(vmax, r.v);
+    });
+    var pad = (hi - lo) * 0.06 || 0.01;
+    lo -= pad; hi += pad;
+    var y = function (v) { return PAD.t + (hi - v) / (hi - lo) * priceH; };
+    var vTop = PAD.t + priceH + gap;
+    var vy = function (v) { return vTop + volH - (v / (vmax || 1)) * volH * 0.9; };
+    var x = function (i) { return PAD.l + step * (i + 0.5); };
+
+    // 网格与右侧价格
+    ctx.font = "10px system-ui, sans-serif";
+    ctx.textBaseline = "middle";
+    for (var g = 1; g <= 3; g++) {
+      var val = lo + (hi - lo) * g / 4, yy = y(val);
+      ctx.strokeStyle = line; ctx.globalAlpha = 0.6;
+      ctx.beginPath(); ctx.moveTo(PAD.l, yy); ctx.lineTo(w - PAD.r + 4, yy); ctx.stroke();
+      ctx.globalAlpha = 1; ctx.fillStyle = txt3; ctx.textAlign = "left";
+      ctx.fillText(val.toFixed(3), w - PAD.r + 8, yy);
+    }
+
+    rows.forEach(function (r, i) {
+      var rise = r.c >= r.o;
+      ctx.strokeStyle = ctx.fillStyle = rise ? up : down;
+      ctx.globalAlpha = 0.92;
+      var cx = x(i);
+      ctx.beginPath(); ctx.moveTo(cx, y(r.h)); ctx.lineTo(cx, y(r.l)); ctx.stroke();
+      var top = Math.min(y(r.o), y(r.c));
+      ctx.fillRect(cx - bw / 2, top, bw, Math.max(1, Math.abs(y(r.c) - y(r.o))));
+      ctx.globalAlpha = 0.45;
+      ctx.fillRect(cx - bw / 2, vy(r.v), bw, Math.max(1, vTop + volH - vy(r.v)));
+      ctx.globalAlpha = 1;
+    });
+
+    // MA5 / MA20
+    function ma(k, color) {
+      ctx.strokeStyle = color; ctx.lineWidth = 1.2; ctx.beginPath();
+      var started = false;
+      for (var i = 0; i < n; i++) {
+        if (i < k - 1) continue;
+        var s = 0;
+        for (var j = i - k + 1; j <= i; j++) s += rows[j].c;
+        var px = x(i), py = y(s / k);
+        if (!started) { ctx.moveTo(px, py); started = true; } else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    }
+    ma(5, css.getPropertyValue("--gold").trim() || "#a8760c");
+    ma(20, css.getPropertyValue("--accent").trim() || "#3f63e8");
+  }
+
+  function openKlineSheet(code, name) {
+    openSheet(name || code,
+      '<div class="dim" style="font-size:12px;margin-bottom:8px">' + esc(code) +
+      ' · 前复权日线 · 最近 120 个交易日</div>' +
+      '<div id="mkWrap"><div class="dim" style="padding:40px 0;text-align:center">加载中…</div></div>' +
+      '<div class="dim mt8" style="font-size:11.5px;line-height:1.7">' +
+      '数据来自腾讯行情；离线或无网络时只能看清单，看不到图。</div>');
+    fetchDaily(code, 120).then(function (rows) {
+      var wrap = document.getElementById("mkWrap");
+      if (!wrap) return;
+      if (!rows.length) {
+        wrap.innerHTML = '<div class="dim" style="padding:30px 0;text-align:center">没取到行情（可能离线）</div>';
+        return;
+      }
+      wrap.innerHTML = '<canvas id="mkCanvas"></canvas>';
+      drawCandles(document.getElementById("mkCanvas"), rows);
+    }).catch(function () {
+      var wrap = document.getElementById("mkWrap");
+      if (wrap) wrap.innerHTML = '<div class="dim" style="padding:30px 0;text-align:center">网络不可用，无法加载 K 线</div>';
+    });
+  }
+
+  /* 点订单里的名字看 K 线（事件委托，行是重绘的，不能逐行绑） */
+  document.addEventListener("click", function (e) {
+    var hit = e.target.closest ? e.target.closest("[data-kcode]") : null;
+    if (!hit) return;
+    openKlineSheet(hit.dataset.kcode, hit.dataset.kname);
+  });
+
   function renderOrders() {
     var rows = (SIG.rows || []).slice().sort(function (a, b) { return b.weight - a.weight; });
     var tw = rows.reduce(function (a, r) { return a + r.weight; }, 0) || 1;
@@ -1184,7 +1318,7 @@
       var short = lots === 0;
 
       list += '<div class="order"' + (short ? ' style="opacity:.62"' : "") + '>' +
-        '<div class="order__name">' + esc(r.name) +
+        '<div class="order__name kopen" data-kcode="' + esc(r.code) + '" data-kname="' + esc(r.name) + '">' + esc(r.name) +
           (r.price_stale ? ' <span class="up" title="行情未更新">⚠</span>' : "") + '</div>' +
         '<div class="order__amt"><b>' + (short ? '<span class="up">不足1手</span>' : money(actual)) + '</b>' +
           '<small>' + (short ? "资金不够" : lots + " 手") + '</small></div>' +
@@ -2005,10 +2139,21 @@
   };
   var current = "overview";
 
+  /* 内置数据缺口超过回补上限时的全局状态：宁可显示旧信号，也不拿空洞算新信号 */
+  var GAP = { days: 0 };
+
+  function gapWarn() {
+    if (!GAP.days) return "";
+    return '<div class="gapwarn"><b>内置数据缺口 ' + GAP.days + ' 天</b>' +
+      '<span>已超过自动回补上限（40 天），本次更新跳过了重算——' +
+      '这段空洞在本地会被当成连续行情，算出来的信号不可信。' +
+      '请更新 APK，或在电脑端更新后重新导出数据。</span></div>';
+  }
+
   function render() {
     var p = PAGES[current];
     var view = $("#view");
-    view.innerHTML = p.render();
+    view.innerHTML = gapWarn() + p.render();
     $("#pageTitle").textContent = p.title;
     if (p.after) p.after();
     window.scrollTo({ top: 0, behavior: "instant" in window ? "instant" : "auto" });

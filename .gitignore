@@ -42,3 +42,7 @@ output/track_cache.json
 
 # 界面走查截图（本地验证用，不是交付物）
 ui_review/
+
+# 任务日志与覆盖率产物（运行时生成）
+output/task_logs/
+.coverage

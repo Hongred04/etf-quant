@@ -66,3 +66,20 @@ def test_backfill_rows_are_ignored():
 def test_empty_archive_returns_empty():
     assert T.signal_fidelity(_archive([]), {}) == []
     assert T.signal_fidelity(None, {}) == []
+
+
+def test_stale_archive_price_is_flagged():
+    """权重一致但归档价与当日收盘差 3%：说明归档用了陈旧价，必须单独标出来。"""
+    a = pd.DataFrame([
+        ("2026-11-02", "sh516620", "影视", 0.5, 0.90, "live"),
+        ("2026-11-02", "sh511520", "政金债", 0.5, 119.0, "live"),
+    ], columns=["signal_date", "code", "name", "weight", "ref_price", "source"])
+    tg = {pd.Timestamp("2026-11-02"): {"sh516620": 0.5, "sh511520": 0.5}}
+    close = pd.DataFrame(
+        {"sh516620": [0.927], "sh511520": [119.747]},
+        index=[pd.Timestamp("2026-11-02")],
+    )
+    out = T.signal_fidelity(a, tg, close=close)
+    assert out[0]["match"] is True          # 权重没问题
+    assert out[0]["price_stale"] is True    # 价格有问题
+    assert out[0]["price_diff"] > 0.02
