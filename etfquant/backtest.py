@@ -60,6 +60,7 @@ class Backtester:
         cb_tickers: set[str] | None = None,
         cb_extra: float = 0.0,
         overlay: "Callable[[pd.Timestamp, float, float], float] | None" = None,
+        pos_stop: float | None = None,
     ):
         self.close = close.sort_index().ffill()
         self.open = (open_.sort_index().ffill() if open_ is not None else self.close)
@@ -72,6 +73,9 @@ class Backtester:
         # 默认 None → 系数 1.0，净值与不带该参数时逐位相同（有测试钉住）。
         # 约定：overlay(date, nav, peak) 只能用当日及以前的信息（nav/peak 都是此刻已知的）。
         self.overlay = overlay
+        # 个股止损：持仓相对建仓价回撤超过 pos_stop 时，次日开盘卖出，
+        # 资金留现金直到下一次调仓。默认 None（关闭）。
+        self.pos_stop = float(pos_stop) if pos_stop else None
 
     def _cb_turn(self, a: pd.Series, b: pd.Series, cols) -> float:
         """换手中来自跨境标的的单边部分。溢价损耗只发生在它们身上。"""
@@ -119,6 +123,7 @@ class Backtester:
         w = pd.Series(0.0, index=cols)
         nav = initial_cash
         peak_nav = initial_cash
+        entry_px: dict[str, float] = {}
         navs, w_rows, turns, costs, hold_rows = [], [], [], [], []
         trade_rows: list[dict] = []
         daily_rows: list[dict] = []
@@ -166,6 +171,8 @@ class Backtester:
                     # 必须补齐到全标的索引，否则 w 会退化成稀疏索引，
                     # 下一轮计算换手时缺失标的按 NaN 被跳过，买入/清仓成交额将漏算。
                     w = tgt.reindex(cols).fillna(0.0)
+                    entry_px = {c: float(self.open.at[dt, c]) for c in w.index
+                                if float(w[c]) > 0}
 
                     r0 = (px.loc[dt] / self.open.loc[dt] - 1.0).replace(
                         [np.inf, -np.inf], np.nan).fillna(0.0)
@@ -173,6 +180,7 @@ class Backtester:
                     nav *= 1.0 + pr0
                     if pr0 != -1.0:
                         w = (w * (1.0 + r0) / (1.0 + pr0)).reindex(cols).fillna(0.0)
+                    nav, w = self._apply_pos_stop(nav, w, px.loc[dt], entry_px)
                     turns.append((dt, turn))
                     costs.append((dt, trade_cost))
                     daily_rows.append({"date": dt, "pr": pr0, "gap": 0.0,
@@ -220,6 +228,8 @@ class Backtester:
                 nav *= 1.0 - trade_cost
                 _record(dt, w, tgt)
                 w = tgt.reindex(cols).fillna(0.0)
+                entry_px = {c: entry_px.get(c, float(self.open.at[dt, c]))
+                            for c in w.index if float(w[c]) > 0}
 
                 # 3) 当日收益：开盘 -> 收盘
                 r = (c_now / o_now - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0)
@@ -240,6 +250,7 @@ class Backtester:
             nav *= 1.0 + pr
             if pr != -1.0:
                 w = (w * (1.0 + r) / (1.0 + pr)).reindex(cols).fillna(0.0)
+            nav, w = self._apply_pos_stop(nav, w, px.loc[dt], entry_px)
             navs.append((dt, nav))
             peak_nav = max(peak_nav, nav)
             w_rows.append(w.copy())
@@ -261,6 +272,29 @@ class Backtester:
             trades_df["date"] = pd.to_datetime(trades_df["date"])
         return BacktestResult(nav_s, w_df, turn_s, cost_s, pd.DataFrame(hold_rows),
                               stats, trades_df, daily_rows)
+
+    def _apply_pos_stop(self, nav: float, w: pd.Series, close_row: pd.Series,
+                        entry_px: dict[str, float]):
+        """个股止损：收盘价相对建仓价跌破阈值 → 当日收盘卖出（MOC 口径）。
+
+        卖出后权重置 0，资金留现金，直到下一次调仓才重新配置。
+        默认关闭；开启后才会改变净值。
+        """
+        if not self.pos_stop or not entry_px:
+            return nav, w
+        for c in list(w.index):
+            wc = float(w.get(c, 0.0))
+            if wc <= 0 or c not in entry_px:
+                continue
+            p0 = entry_px[c]
+            px_c = float(close_row.get(c, np.nan)) if hasattr(close_row, "get") else np.nan
+            if not np.isfinite(p0) or p0 <= 0 or not np.isfinite(px_c):
+                continue
+            if px_c / p0 - 1.0 <= -self.pos_stop:
+                nav *= 1.0 - wc * self.cost_per_side
+                w.loc[c] = 0.0
+                entry_px.pop(c, None)
+        return nav, w
 
     @staticmethod
     def _norm(w: dict[str, float]) -> pd.Series:

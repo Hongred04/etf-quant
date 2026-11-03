@@ -68,6 +68,20 @@ def vol_overlay(target: float, window: int = 20):
     return f
 
 
+def _metrics(res, name: str) -> dict:
+    nav = res.nav
+    return {
+        "name": name,
+        "cagr": float(M.cagr(nav)),
+        "mdd": float(M.max_drawdown(nav)),
+        "sharpe": float(M.sharpe(nav)),
+        "calmar": float(M.calmar(nav)),
+        "avg_exposure": float(res.weights.sum(axis=1).mean()),
+        "cost": float(res.cost.sum()),
+        "underwater_days": int(M.underwater_stats(nav)["max_days"]),
+    }
+
+
 def measure(panel, targets, overlay, name: str) -> dict:
     res = Backtester(panel.close, panel.open_, overlay=overlay).run(
         targets, start="2019-01-25")
@@ -99,7 +113,28 @@ def main() -> int:
     for tgt in (0.10, 0.12, 0.15, 0.18):
         scenarios.append((f"C 波动目标 {tgt:.0%}", vol_overlay(tgt)))
 
-    rows = [measure(panel, targets, ov, name) for name, ov in scenarios]
+    # D 个股止损 / E 熊市空仓：这两类不动 targets 结构，单独跑
+    for st in (0.06, 0.08, 0.10, 0.12, 0.15):
+        res = Backtester(panel.close, panel.open_, pos_stop=st).run(
+            targets, start="2019-01-25")
+        scenarios.append((f"D 个股止损 {st:.0%}", ("pos", st, res)))
+    for label, kw in (("E1 熊市空仓（半仓档归零）", dict(expo_mid=0.0)),
+                      ("E2 三档 0.35 以下空仓", dict(regime_low=0.35, expo_low=0.0))):
+        st = TrendGatedAdaptive(panel, **kw)
+        r2 = Backtester(panel.close, panel.open_).run(st.generate(), start="2019-01-25")
+        scenarios.append((label, ("kv", kw, r2)))
+
+    rows = []
+    for name, spec in scenarios:
+        if spec is None:
+            rows.append(measure(panel, targets, None, name))
+        elif isinstance(spec, tuple) and spec[0] == "pos":
+            r2 = spec[2]
+            rows.append(_metrics(r2, name))
+        elif isinstance(spec, tuple) and spec[0] == "kv":
+            rows.append(_metrics(spec[2], name))
+        else:
+            rows.append(measure(panel, targets, spec, name))
     df = pd.DataFrame(rows)
     df["meets"] = df["mdd"] >= TARGET_DD
 
@@ -134,6 +169,8 @@ def main() -> int:
     fixed = df[df["name"].str.startswith("A ")]
     brk = df[df["name"].str.startswith("B ")]
     vol = df[df["name"].str.startswith("C ")]
+    pos = df[df["name"].str.startswith("D ")]
+    zeroq = df[df["name"].str.startswith("E")]
     meet = ok.iloc[0] if not ok.empty else None
 
     lines = [
