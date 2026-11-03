@@ -1911,3 +1911,18 @@ html[data-theme="light"] .kpanel__legend { color: var(--txt-3); }
 .fwd-stats > div { display: flex; flex-direction: column; gap: 4px; }
 .fwd-stats span { font-size: 11.5px; color: var(--txt-3); letter-spacing: 0.02em; }
 .fwd-stats b { font-size: 13.5px; font-weight: 620; }
+
+/* 核心腿标记：这类持仓每期等权重置、不随信号换出，与卫星腿的执行逻辑不同 */
+.leg-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid rgba(109, 140, 255, 0.30);
+  vertical-align: 1px;
+  white-space: nowrap;
+}

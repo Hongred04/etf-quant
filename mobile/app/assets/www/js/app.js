@@ -1319,6 +1319,7 @@
 
       list += '<div class="order"' + (short ? ' style="opacity:.62"' : "") + '>' +
         '<div class="order__name kopen" data-kcode="' + esc(r.code) + '" data-kname="' + esc(r.name) + '">' + esc(r.name) +
+          (r.leg === "core" ? ' <span class="legtag">核心</span>' : "") +
           (r.price_stale ? ' <span class="up" title="行情未更新">⚠</span>' : "") + '</div>' +
         '<div class="order__amt"><b>' + (short ? '<span class="up">不足1手</span>' : money(actual)) + '</b>' +
           '<small>' + (short ? "资金不够" : lots + " 手") + '</small></div>' +

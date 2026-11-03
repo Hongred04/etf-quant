@@ -118,7 +118,7 @@ CACHE_LOCK = threading.Lock()
 TRACK_CACHE = OUT / "track_cache.json"
 # 落盘结构版本：加了 fidelity/forward 字段后旧缓存必须作废，
 # 否则升级当天页面会读到一个没有这些字段的旧 payload（指纹只看数据日期，不看代码）。
-TRACK_SCHEMA = 4
+TRACK_SCHEMA = 8
 TRACK_LOCK = threading.Lock()
 
 
@@ -587,6 +587,9 @@ def api_signal() -> dict:
     # （signal_2026-10-28.csv 之类），按文件名排序会把它们当成最新一期。
     fp = OUT / f"signal_{meta.get('rebalance_date')}.csv"
     df = _csv(fp if fp.exists() else sigs[-1], dtype={"代码": str})
+    # 核心-卫星：标出哪些是固定持有的核心腿。两者的执行逻辑不同——
+    # 核心腿每期等权重置，卫星腿可能被换掉；混在一张表里用户会误操作。
+    core_codes = set(meta.get("core_codes") or [])
     rows = []
     if df is not None:
         for _, r in df.iterrows():
@@ -594,6 +597,7 @@ def api_signal() -> dict:
                 "code": str(r["代码"]),
                 "name": str(r["名称"]),
                 "category": str(r["类别"]),
+                "leg": "core" if str(r["代码"]) in core_codes else "sat",
                 "weight": float(r["目标权重"]),
                 "price": float(r["最新价"]),
                 "r20": float(r["R20%"]) if pd.notna(r["R20%"]) else None,
@@ -1269,6 +1273,18 @@ def api_track() -> dict:
 
         from etfquant import track as T
 
+        # 核心-卫星组合：归档里含固定等权的红利低波腿，保真比对要剔除它们。
+        core_codes: list[str] = []
+        core_weight = 0.0
+        try:
+            meta_fp = OUT / "signal_meta.json"
+            if meta_fp.exists():
+                _meta = json.loads(meta_fp.read_text(encoding="utf-8"))
+                core_codes = list(_meta.get("core_codes") or [])
+                core_weight = float(_meta.get("core_weight") or 0.0)
+        except (OSError, ValueError):
+            core_codes, core_weight = [], 0.0
+
         arch = T.load_archive(T.archive_path(DATA))
         if arch.empty:
             return {"count": 0, "periods": [], "series": [], "paper": None, "backtest": None,
@@ -1276,7 +1292,8 @@ def api_track() -> dict:
                     "hint": "还没有归档信号。运行一次「生成选股信号」后开始记录。"}
 
         panel = _track_panel()
-        res = T.build_track(panel, _strategy_targets(panel), arch)
+        res = T.build_track(panel, _strategy_targets(panel), arch,
+                            core_codes=core_codes, core_weight=core_weight)
         res["hint"] = (
             "backfill 期是事后用当前策略回放出来的，只用于垫底展示，不等于当时真实给出的建议。"
             if res.get("backfill_count") else ""

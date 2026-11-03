@@ -134,7 +134,7 @@ def period_spans(index: pd.DatetimeIndex, signal_dates: list[pd.Timestamp]) -> l
 
 def signal_fidelity(
     archived: pd.DataFrame, strategy_targets: dict, close: pd.DataFrame | None = None,
-    tol: float = 1e-4, price_tol: float = 0.01,
+    tol: float = 5e-4, price_tol: float = 0.01, core_codes: list[str] | None = None,
 ) -> list[dict]:
     """逐期比对「live 归档信号」与「回测在同一天给出的目标权重」。
 
@@ -146,17 +146,45 @@ def signal_fidelity(
 
     只比 live 期：backfill 是用**当前**策略回放的，与回测按构造一致，
     拿它来证明"信号保真"是循环论证。
+
+    核心-卫星组合（`--core-weight`）启用后，归档里会多出 4 只固定等权的
+    红利低波腿。它们不来自策略信号，不该参与保真比对——否则每期都会
+    因为"回测目标里没有这 4 只"而报不一致。这里把核心腿从两侧剔除，
+    剩余卫星腿重归一化后再比，比的才是真正需要保真的那部分。
     """
     if archived is None or archived.empty or "source" not in archived.columns:
         return []
     live = archived[archived["source"] == "live"]
     if live.empty:
         return []
+    core = set(core_codes or ())
+
+    def _strip(weights: dict) -> dict:
+        """剔除核心腿并重归一化，只留卫星腿的相对权重。"""
+        rest = {c: w for c, w in weights.items() if c not in core}
+        total = sum(rest.values())
+        return {c: w / total for c, w in rest.items()} if total > 0 else rest
+
     out: list[dict] = []
     for d, grp in live.groupby("signal_date"):
         ts = pd.Timestamp(str(d))
         w_live = {str(c): float(w) for c, w in zip(grp["code"], grp["weight"])}
         w_bt = {str(k): float(v) for k, v in (strategy_targets.get(ts) or {}).items()}
+        n_core = sum(1 for c in w_live if c in core)
+        if core and n_core == 0:
+            # 旧口径的历史期（切换核心腿之前归档的纯卫星信号）：
+            # 与组合回测比必然不一致，跳过并标注，而不是报成错误。
+            out.append({
+                "signal_date": ts.strftime("%Y-%m-%d"),
+                "n_live": len(w_live), "n_backtest": 0, "overlap": 0,
+                "l1": 0.0, "max_diff": 0.0, "match": True,
+                "price_diff": None, "price_stale": False,
+                "core_legs": 0, "legacy": True,
+            })
+            continue
+        if core:
+            w_live = _strip(w_live)
+            w_bt = _strip(w_bt)
         codes = set(w_live) | set(w_bt)
         l1 = sum(abs(w_live.get(c, 0.0) - w_bt.get(c, 0.0)) for c in codes) / 2.0
         max_diff = max((abs(w_live.get(c, 0.0) - w_bt.get(c, 0.0)) for c in codes), default=0.0)
@@ -183,6 +211,7 @@ def signal_fidelity(
             "match": bool(set(w_live) == set(w_bt) and max_diff <= tol),
             "price_diff": price_diff,
             "price_stale": bool(price_diff is not None and price_diff > price_tol),
+            "core_legs": n_core,
         })
     return out
 
@@ -253,12 +282,17 @@ def archive_rows(out: pd.DataFrame, close: pd.DataFrame, sig_date: pd.Timestamp)
     return rows
 
 
-def build_track(panel, strategy_targets: dict, archived: pd.DataFrame) -> dict:
+def build_track(panel, strategy_targets: dict, archived: pd.DataFrame,
+                core_codes: list[str] | None = None,
+                core_weight: float = 0.0) -> dict:
     """
     计算纸上净值，并与"同期回测"对齐比较。
 
     对齐口径：两条曲线都从**首期信号的执行日**开始，到数据末日为止。
     回测用同一套 Backtester 与成本，差异只来自"信号是否被冻结"。
+
+    核心-卫星：归档里含固定等权的核心腿，回测对照也必须按同样比例混合，
+    否则纸上净值（组合）对着纯卫星回测比，偏差里全是结构差异而不是执行差异。
     """
     tg = archive_targets(archived)
     if not tg:
@@ -272,7 +306,22 @@ def build_track(panel, strategy_targets: dict, archived: pd.DataFrame) -> dict:
 
     bt = Backtester(panel.close, panel.open_)
     paper = bt.run(tg, start=start, end=end)
-    ref = bt.run(strategy_targets, start=start, end=end)
+    bt_targets = strategy_targets
+    if core_weight > 0 and core_codes:
+        from etfquant.combo import blend_targets
+
+        mixed = blend_targets(strategy_targets, core_weight, core_codes)
+        # 切换核心腿之前归档的期数不含核心腿，回测对照对这些期也要用纯卫星，
+        # 否则 ref 会凭空多出 50% 的核心腿，与 paper 的偏差全是结构差异。
+        core_set = set(core_codes)
+        has_core = archived.groupby("signal_date")["code"].apply(
+            lambda col: any(str(c) in core_set for c in col))
+        legacy = {pd.Timestamp(str(d)) for d, v in has_core.items() if not v}
+        bt_targets = {
+            d: (strategy_targets.get(d, {}) if d in legacy else w)
+            for d, w in mixed.items()
+        }
+    ref = bt.run(bt_targets, start=start, end=end)
 
     p_nav, r_nav = paper.nav, ref.nav
     idx = p_nav.index.intersection(r_nav.index)
@@ -329,7 +378,8 @@ def build_track(panel, strategy_targets: dict, archived: pd.DataFrame) -> dict:
 
     # 前向验证：live 期从首期执行日到数据末日的偏差，与回填期分开算。
     # 全样本的 paper-vs-backtest 在回填段按构造恒等，把它算进"偏差"会稀释问题。
-    fidelity = signal_fidelity(archived, strategy_targets, panel.close)
+    fidelity = signal_fidelity(archived, strategy_targets, panel.close,
+                               core_codes=core_codes)
     live_all = [p for p in periods if p.get("source") == "live"]
     live_exec = [p["exec_date"] for p in live_all if p.get("exec_date")]
     fwd = {

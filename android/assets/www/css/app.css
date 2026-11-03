@@ -1048,3 +1048,16 @@ table.tbl tr.is-hl td { background: var(--accent-soft); }
 /* 可点开 K 线的标的名称 */
 .kopen { cursor: pointer; }
 .kopen:active { color: var(--accent); }
+
+/* 核心腿标记：每期等权重置、不随信号换出 */
+.legtag {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 9.5px;
+  line-height: 1.5;
+  color: var(--accent);
+  background: rgba(63, 99, 232, 0.12);
+  vertical-align: 1px;
+}

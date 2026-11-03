@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT))
 
 from etfquant.io_utils import atomic_to_csv
 from etfquant.pipeline import load_panel
+from etfquant import combo as COMBO
 from etfquant.risk import resolve_scale
 from etfquant.strategy import STRATEGY_REGISTRY, TrendGatedAdaptive
 from etfquant.rebalance import last_rebalance, schedule, trading_days_between
@@ -34,6 +35,11 @@ def main() -> None:
     ap.add_argument("--strategy", default="s4_tgar")
     ap.add_argument("--risk-scale", type=float, default=None,
                     help="风险预算系数（0.1~1.0）；默认读 ETF_RISK_SCALE 或 1.0")
+    ap.add_argument("--core-weight", type=float, default=0.5,
+                    help="红利低波核心腿占比（0~1）。默认 0.5 = 核心50%%+卫星50%%；"
+                         "0 = 纯动量卫星（旧行为）")
+    ap.add_argument("--core-basket", default="a", choices=["a", "ah"],
+                    help="核心篮子：a = 纯A股4只（默认）；ah = 加港股3只（收益更高但有溢价）")
     ap.add_argument("--date", default=None)
     ap.add_argument("--out", default=None)
     ap.add_argument("--no-archive", action="store_true", help="只出信号，不写归档")
@@ -79,6 +85,14 @@ def main() -> None:
     if not target:
         elig = strat.eligible_at(sig_date)
         target = strat.target_weights(sig_date, elig)
+    # 核心-卫星：先把资金按 core_weight 分给红利低波等权篮子，其余给动量卫星。
+    # 核心腿不择时（这是它的分散价值），在每个调仓日等权重置。
+    core_codes = []
+    if args.core_weight > 0:
+        core_codes = COMBO.core_basket(args.core_basket)
+        blended = COMBO.blend_targets({sig_date: target}, args.core_weight, core_codes)
+        target = blended[sig_date]
+
     # 风险预算：把目标权重整体缩放，剩余留现金。默认 1.0，不改变现有行为。
     k = resolve_scale(args.risk_scale)
     if k < 1.0:
@@ -95,7 +109,7 @@ def main() -> None:
                 "代码": tk,
                 "名称": meta.loc[tk, "name"] if tk in meta.index else "",
                 "类别": meta.loc[tk, "category"] if tk in meta.index else "",
-                "目标权重": round(float(wt), 4),
+                "目标权重": round(float(wt), 6),
                 # 参考价取**数据截止日**收盘：下单时要付的是这个价，
                 # 而调仓日收盘价只是决策依据。两者相差几天时按前者算手数才不会买错。
                 "最新价": round(float(panel.close.loc[data_date, tk]), 3),
@@ -161,6 +175,8 @@ def main() -> None:
         "held_days": int(held),
         "strategy": strat.name,
         "risk_scale": k,
+        "core_weight": float(args.core_weight),
+        "core_codes": core_codes,
         "regime": float(strat.regime_at(sig_date)) if isinstance(strat, TrendGatedAdaptive) else None,
         "exposure": float(strat._exposure(strat.regime_at(sig_date)))
         if isinstance(strat, TrendGatedAdaptive) else None,

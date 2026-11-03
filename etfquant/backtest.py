@@ -61,6 +61,7 @@ class Backtester:
         cb_extra: float = 0.0,
         overlay: "Callable[[pd.Timestamp, float, float], float] | None" = None,
         pos_stop: float | None = None,
+        drift: bool = False,
     ):
         self.close = close.sort_index().ffill()
         self.open = (open_.sort_index().ffill() if open_ is not None else self.close)
@@ -76,6 +77,14 @@ class Backtester:
         # 个股止损：持仓相对建仓价回撤超过 pos_stop 时，次日开盘卖出，
         # 资金留现金直到下一次调仓。默认 None（关闭）。
         self.pos_stop = float(pos_stop) if pos_stop else None
+        # 权重漂移：仍在目标里的持仓不重置为等权，而是沿用漂移后的权重。
+        # 动量的收益来自少数持续上涨的赢家，每期等权重置等于定期砍赢家。
+        # 默认 False（逐位复现旧净值）。
+        self.drift = bool(drift)
+        # 权重漂移：仍在目标里的持仓不重置为等权，而是沿用漂移后的权重。
+        # 动量的收益来自少数持续上涨的赢家，每期等权重置等于定期砍赢家。
+        # 默认 False（逐位复现旧净值）。
+        self.drift = bool(drift)
 
     def _cb_turn(self, a: pd.Series, b: pd.Series, cols) -> float:
         """换手中来自跨境标的的单边部分。溢价损耗只发生在它们身上。"""
@@ -221,6 +230,7 @@ class Backtester:
                 tgt = self._norm(exec_targets[dt])
                 mult = float(self.overlay(dt, nav, peak_nav)) if self.overlay else 1.0
                 tgt = tgt * max(0.0, min(1.0, mult))
+                tgt = self._drift(tgt, w)
                 turn = 0.5 * float((tgt.reindex(cols).fillna(0.0) - w).abs().sum())
                 # 实际成交金额 = Σ|Δw| = 2 × 单边换手，成本按成交金额计
                 cb_turn = self._cb_turn(tgt.reindex(cols).fillna(0.0), w, cols)
@@ -272,6 +282,60 @@ class Backtester:
             trades_df["date"] = pd.to_datetime(trades_df["date"])
         return BacktestResult(nav_s, w_df, turn_s, cost_s, pd.DataFrame(hold_rows),
                               stats, trades_df, daily_rows)
+
+    def _drift(self, tgt: pd.Series, w: pd.Series) -> pd.Series:
+        """把 tgt 中"上期已持有"的部分替换为漂移权重，总敞口不变。
+
+        新进的标的按原目标权重；老仓位按漂移后的相对比例分配剩余敞口，
+        因此涨得多的标的权重自然变大，不会被每期等权重置砍掉。
+        """
+        if not self.drift:
+            return tgt
+        total = float(tgt.sum())
+        if total <= 0:
+            return tgt
+        held = [c for c in tgt.index if tgt[c] > 0 and float(w.get(c, 0.0)) > 0]
+        new = [c for c in tgt.index if tgt[c] > 0 and c not in held]
+        out = pd.Series(0.0, index=tgt.index)
+        new_sum = float(tgt[new].sum()) if new else 0.0
+        for c in new:
+            out[c] = float(tgt[c])
+        rest = max(0.0, total - new_sum)
+        base = float(sum(float(w.get(c, 0.0)) for c in held))
+        if held and base > 0:
+            for c in held:
+                out[c] = float(w.get(c, 0.0)) / base * rest
+        elif held:
+            for c in held:
+                out[c] = rest / len(held)
+        return out
+
+    def _drift(self, tgt: pd.Series, w: pd.Series) -> pd.Series:
+        """把 tgt 中"上期已持有"的部分替换为漂移权重，总敞口不变。
+
+        新进的标的按原目标权重；老仓位按漂移后的相对比例分配剩余敞口，
+        因此涨得多的标的权重自然变大，不会被每期等权重置砍掉。
+        """
+        if not self.drift:
+            return tgt
+        total = float(tgt.sum())
+        if total <= 0:
+            return tgt
+        held = [c for c in tgt.index if tgt[c] > 0 and float(w.get(c, 0.0)) > 0]
+        new = [c for c in tgt.index if tgt[c] > 0 and c not in held]
+        out = pd.Series(0.0, index=tgt.index)
+        new_sum = float(tgt[new].sum()) if new else 0.0
+        for c in new:
+            out[c] = float(tgt[c])
+        rest = max(0.0, total - new_sum)
+        base = float(sum(float(w.get(c, 0.0)) for c in held))
+        if held and base > 0:
+            for c in held:
+                out[c] = float(w.get(c, 0.0)) / base * rest
+        elif held:
+            for c in held:
+                out[c] = rest / len(held)
+        return out
 
     def _apply_pos_stop(self, nav: float, w: pd.Series, close_row: pd.Series,
                         entry_px: dict[str, float]):

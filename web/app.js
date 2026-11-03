@@ -907,6 +907,7 @@
           <td class="dim">${i + 1}</td>
           <td style="text-align:left">
             <span class="strong kopen" data-kcode="${esc(r.code)}">${esc(r.name)}</span>
+            ${r.leg === "core" ? '<span class="leg-tag" title="核心腿：每期等权重置，不随信号换出">核心</span>' : ""}
             <span class="mono dim">${esc(r.code)}</span>
           </td>
           <td><span class="tag c-${esc(r.category)}">${esc(r.category)}</span></td>

@@ -6,8 +6,8 @@
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.etfquant.mobile"
-    android:versionCode="24"
-    android:versionName="1.5.8">
+    android:versionCode="26"
+    android:versionName="1.5.10">
 
     <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34" />
 

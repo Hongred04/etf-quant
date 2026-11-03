@@ -94,3 +94,30 @@ def test_archive_rows_use_signal_date_close():
     rows = T.archive_rows(out, close, pd.Timestamp("2026-11-02"))
     assert rows[0]["ref_price"] == 0.90
     assert rows[0]["weight"] == 0.5
+
+
+def test_core_legs_are_excluded_from_comparison():
+    """启用核心-卫星后，归档含固定等权的红利低波腿，不应因此判为不一致。"""
+    a = pd.DataFrame([
+        ("2026-11-02", "sh512890", "红利低波", 0.125, 1.2, "live"),
+        ("2026-11-02", "sh515450", "红利低波50", 0.125, 1.4, "live"),
+        ("2026-11-02", "sh516620", "影视", 0.25, 0.9, "live"),
+        ("2026-11-02", "sh511520", "政金债", 0.25, 119.0, "live"),
+    ], columns=["signal_date", "code", "name", "weight", "ref_price", "source"])
+    # 回测目标只有卫星腿（满权重，无核心腿）
+    tg = {pd.Timestamp("2026-11-02"): {"sh516620": 0.5, "sh511520": 0.5}}
+    out = T.signal_fidelity(a, tg, core_codes=["sh512890", "sh515450"])
+    assert out[0]["match"] is True
+    assert out[0]["core_legs"] == 2
+
+
+def test_without_core_hint_same_rows_mismatch():
+    """不告诉函数哪些是核心腿时，同样两条记录会被判为不一致（对照组）。"""
+    a = pd.DataFrame([
+        ("2026-11-02", "sh512890", "红利低波", 0.125, 1.2, "live"),
+        ("2026-11-02", "sh516620", "影视", 0.25, 0.9, "live"),
+        ("2026-11-02", "sh511520", "政金债", 0.25, 119.0, "live"),
+    ], columns=["signal_date", "code", "name", "weight", "ref_price", "source"])
+    tg = {pd.Timestamp("2026-11-02"): {"sh516620": 0.5, "sh511520": 0.5}}
+    out = T.signal_fidelity(a, tg)
+    assert out[0]["match"] is False

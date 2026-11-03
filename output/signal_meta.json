@@ -9,13 +9,21 @@
   "days_to_next": 5,
   "held_days": 0,
   "strategy": "S4-TGAR(自研)",
+  "risk_scale": 1.0,
+  "core_weight": 0.5,
+  "core_codes": [
+    "sh512890",
+    "sh515450",
+    "sh515300",
+    "sz159307"
+  ],
   "regime": 0.0,
   "exposure": 0.5,
-  "equity_weight": 0.5001,
-  "bond_weight": 0.5,
-  "n_holdings": 4,
+  "equity_weight": 0.75,
+  "bond_weight": 0.25,
+  "n_holdings": 8,
   "note": "跨境/商品类标的的仓位同样受 A 股状态闸门约束；实盘建议按资产类别独立判定市场状态。",
   "stale_price_count": 0,
   "stale_price_names": [],
-  "generated_at": "2026-11-03 09:45:54"
+  "generated_at": "2026-11-03 11:09:52"
 }
