@@ -1035,7 +1035,7 @@
 
     /* 前向验证：先确认"记录的信号就是策略给的"，再谈偏差。
        只有 2 期 live 时任何结论都不成立，所以把门槛写死在界面上。 */
-    const fwd = d.forward || { live_periods: 0, live_days: 0, divergence: null, verdict: "还没有 live 记录", need: 8 };
+    const fwd = d.forward || { live_periods: 0, live_days: 0, divergence: null, verdict: "还没有 live 记录", need: 8, selection_cum: null, selection_max_share: null, selection_verdict: "—" };
     const fid = d.fidelity || [];
     // 偏差小到 0.005pp 以下就不上色：给 0.00pp 涂红戴绿只会制造噪音
     const fwdCls = fwd.divergence == null || Math.abs(fwd.divergence) < 5e-5 ? "" : cls(fwd.divergence);
@@ -1050,6 +1050,7 @@
             <div><span>已记录 / 已执行</span><b>${fwd.live_periods} 期 · 已执行 ${fwd.live_executed ?? 0} 期</b></div>
             <div><span>live 段偏差 · ${fwd.live_days} 个交易日</span><b class="${fwdCls}">${fwd.divergence == null ? "—" : `${fwd.divergence >= 0 ? "+" : ""}${(fwd.divergence * 100).toFixed(2)}pp`}</b></div>
             <div><span>判定</span><b>${esc(fwd.verdict)}</b></div>
+            <div><span>选股贡献 · ${fwd.selection_verdict || "—"}</span><b class="${(fwd.selection_cum ?? 0) >= 0 ? "up" : "down"}">${fwd.selection_cum == null ? "—" : `${(fwd.selection_cum * 100).toFixed(2)}pp`}${fwd.selection_max_share == null ? "" : ` <span class="dim">· 最大单期 ${(fwd.selection_max_share * 100).toFixed(0)}%</span>`}</b></div>
           </div>
           ${fid.length ? `<div class="table-wrap"><table>
             <thead><tr><th style="text-align:left">信号日</th><th>持仓（live/回测）</th><th>重合</th><th>权重 L1</th><th>最大偏差</th><th>归档价偏差</th><th>结论</th></tr></thead>

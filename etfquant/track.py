@@ -187,6 +187,72 @@ def signal_fidelity(
     return out
 
 
+def selection_by_period(
+    comp: pd.DataFrame, exec_dates: list[pd.Timestamp]
+) -> list[dict]:
+    """把逐日选股贡献按持仓期汇总（只用于 live 期）。
+
+    为什么盯这个指标：归因显示历史上 54% 的选股 alpha 来自单一年份。
+    如果 live 期也出现"一期贡献占掉全部"，那说明策略依赖偶发机会，
+    而不是稳定能力——这比总收益是否达标更早给出信号。
+    """
+    if comp is None or comp.empty or not exec_dates:
+        return []
+    dates = sorted(pd.Timestamp(d) for d in exec_dates)
+    out: list[dict] = []
+    for i, d0 in enumerate(dates):
+        d1 = dates[i + 1] if i + 1 < len(dates) else None
+        seg = comp["selection"].loc[d0:] if d1 is None else comp["selection"].loc[d0:d1]
+        if d1 is not None:
+            seg = seg[seg.index < d1]
+        out.append({
+            "exec_date": str(d0.date()),
+            "selection": float(seg.sum()),
+        })
+    return out
+
+
+def selection_concentration(periods: list[dict]) -> dict:
+    """累计选股贡献与"最大单期占比"。"""
+    vals = [p["selection"] for p in periods]
+    cum = float(sum(vals))
+    if not periods:
+        return {"cum": None, "max_share": None, "n": 0}
+    top = max(vals)
+    share = (top / cum) if cum > 0 else None
+    return {"cum": cum, "max_share": share, "n": len(periods)}
+
+
+def archive_rows(out: pd.DataFrame, close: pd.DataFrame, sig_date: pd.Timestamp) -> list[dict]:
+    """把信号表转成归档行，参考价取**调仓日收盘**。
+
+    原实现取 `最新价`：如果信号是在调仓日之后才生成的（补跑、隔天重算），
+    归档里就会写下未来某天的价格，与 signal_date 对不上。
+    纸上净值用开盘价成交、不受影响，但"归档价偏差"会一直报警，
+    而且用户看到的成本基准是错的。
+    """
+    sig_date = pd.Timestamp(sig_date)
+    rows = []
+    for _, r in out.iterrows():
+        code = str(r["代码"])
+        px = None
+        if sig_date in close.index and code in close.columns:
+            v = close.at[sig_date, code]
+            if pd.notna(v) and float(v) > 0:
+                px = float(v)
+        if px is None and pd.notna(r.get("最新价")):
+            px = float(r["最新价"])
+        rows.append({
+            "signal_date": str(sig_date.date()),
+            "code": code,
+            "name": str(r["名称"]),
+            "category": str(r["类别"]),
+            "weight": float(r["目标权重"]),
+            "ref_price": px,
+        })
+    return rows
+
+
 def build_track(panel, strategy_targets: dict, archived: pd.DataFrame) -> dict:
     """
     计算纸上净值，并与"同期回测"对齐比较。
@@ -274,6 +340,16 @@ def build_track(panel, strategy_targets: dict, archived: pd.DataFrame) -> dict:
         "verdict": "还没有 live 记录",
         "need": 8,
     }
+    sel_periods, sel_conc = [], {"cum": None, "max_share": None, "n": 0}
+    if live_exec:
+        from etfquant import attribution as A
+
+        cat = panel.meta["category"] if "category" in panel.meta else pd.Series(dtype=object)
+        eq_cols = [c for c in panel.close.columns if cat.get(c) != "债券"]
+        comp, _ = A.decompose(paper.daily, panel.close, panel.open_, eq_cols)
+        sel_periods = selection_by_period(comp, [pd.Timestamp(d) for d in live_exec])
+        sel_conc = selection_concentration(sel_periods)
+
     if live_exec:
         start = min(live_exec)
         sub = [s for s in series if s["date"] >= start]
@@ -291,6 +367,18 @@ def build_track(panel, strategy_targets: dict, archived: pd.DataFrame) -> dict:
                 fwd["verdict"] = "与回测一致"
             else:
                 fwd["verdict"] = "偏差偏大，需要排查"
+
+    fwd["selection_cum"] = sel_conc["cum"]
+    fwd["selection_max_share"] = sel_conc["max_share"]
+    fwd["selection_periods"] = sel_periods
+    if sel_conc["n"] == 0:
+        fwd["selection_verdict"] = "还没有 live 持仓期"
+    elif sel_conc["n"] < 8:
+        fwd["selection_verdict"] = "样本不足"
+    elif sel_conc["max_share"] is not None and sel_conc["max_share"] > 0.5:
+        fwd["selection_verdict"] = "仍由单期主导"
+    else:
+        fwd["selection_verdict"] = "贡献已分散"
 
     return {
         "count": len(dates),

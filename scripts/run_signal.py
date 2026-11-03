@@ -176,18 +176,13 @@ def main() -> None:
     # 同一信号日整体替换，重复生成不会叠加。
     if not args.no_archive and not out.empty:
         try:
-            from etfquant.track import archive_path, upsert_signal
-            rows = [{
-                # signal_date 记调仓日：同一调仓窗口内反复运行会整体替换同一条，
-                # 归档因此天然是"每期一条"，不会再出现"每天一份新清单"。
-                "signal_date": str(sig_date.date()),
-                "exec_date": str(sched["exec_date"].date()),
-                "code": str(r["代码"]),
-                "name": str(r["名称"]),
-                "category": str(r["类别"]),
-                "weight": float(r["目标权重"]),
-                "ref_price": float(r["最新价"]) if pd.notna(r["最新价"]) else None,
-            } for _, r in out.iterrows()]
+            from etfquant.track import archive_path, archive_rows, upsert_signal
+            # signal_date 记调仓日：同一调仓窗口内反复运行会整体替换同一条，
+            # 归档因此天然是"每期一条"，不会再出现"每天一份新清单"。
+            # 参考价必须取调仓日收盘（不是"最新价"），否则补跑时会写下未来价格。
+            rows = archive_rows(out, panel.close, sig_date)
+            for row, (_, r) in zip(rows, out.iterrows()):
+                row["exec_date"] = str(sched["exec_date"].date())
             n = upsert_signal(archive_path(ROOT / "data"), rows, source="live")
             print(f"[OK] 已归档 {n} 条信号到 data/signal_archive.csv（source=live）")
         except Exception as exc:  # noqa: BLE001 —— 归档失败不该让出信号这一步失败

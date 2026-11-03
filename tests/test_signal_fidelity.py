@@ -83,3 +83,14 @@ def test_stale_archive_price_is_flagged():
     assert out[0]["match"] is True          # 权重没问题
     assert out[0]["price_stale"] is True    # 价格有问题
     assert out[0]["price_diff"] > 0.02
+
+
+def test_archive_rows_use_signal_date_close():
+    """补跑信号时，"最新价"可能已经是几天后的价；归档必须存调仓日收盘。"""
+    out = pd.DataFrame([{"代码": "sh516620", "名称": "影视", "类别": "行业",
+                         "目标权重": 0.5, "最新价": 0.95}])
+    close = pd.DataFrame({"sh516620": [0.90, 0.95]},
+                         index=[pd.Timestamp("2026-11-02"), pd.Timestamp("2026-11-03")])
+    rows = T.archive_rows(out, close, pd.Timestamp("2026-11-02"))
+    assert rows[0]["ref_price"] == 0.90
+    assert rows[0]["weight"] == 0.5

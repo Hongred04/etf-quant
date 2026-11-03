@@ -118,7 +118,7 @@ CACHE_LOCK = threading.Lock()
 TRACK_CACHE = OUT / "track_cache.json"
 # 落盘结构版本：加了 fidelity/forward 字段后旧缓存必须作废，
 # 否则升级当天页面会读到一个没有这些字段的旧 payload（指纹只看数据日期，不看代码）。
-TRACK_SCHEMA = 3
+TRACK_SCHEMA = 4
 TRACK_LOCK = threading.Lock()
 
 
