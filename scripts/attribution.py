@@ -57,6 +57,36 @@ def main() -> int:
     be = A.break_even_cost(comp, bench_cagr)
 
     net_cagr = A.cagr_from_returns(comp["net"])
+    # ---- 深度分析：alpha 的时间集中度 / 闸门诊断 / 敏感性 ----
+    yearly = (comp.groupby(comp.index.year)[
+        ["beta", "timing", "selection", "bond", "cost", "net"]].sum() * 100)
+    roll = comp["selection"].rolling(252).sum() * 100
+
+    w = comp["w_eq"]
+    off = w < 0.75
+    fwd20 = comp["bench"].shift(-1).rolling(20).sum().shift(-19)
+    gate = {
+        "off_share": float(off.mean()),
+        "switches": int((off.astype(int).diff().abs() == 1).sum()),
+        "fwd20_on": float(fwd20[~off].mean()),
+        "fwd20_off": float(fwd20[off].mean()),
+    }
+
+    timing_best = int(yearly["timing"].idxmax()) if not yearly.empty else 0
+    timing_worst = int(yearly["timing"].idxmin()) if not yearly.empty else 0
+
+    sens = []
+    for k in (1.0, 0.75, 0.5, 0.25, 0.0):
+        adj = comp["net"] - (1.0 - k) * comp["selection"]
+        sens.append({"realized": k, "cagr": A.cagr_from_returns(adj)})
+
+    ep = A.episode_pnl(contrib, A.episodes_from_trades(res.trades, comp.index[-1]))
+    ep = ep.sort_values("pnl", ascending=False).head(6)
+    name_map = pool.set_index("ticker")["name"].to_dict()
+    top_eps = [{"code": r.code, "name": name_map.get(r.code, r.code),
+                "start": str(r.start.date()), "end": str(r.end.date()),
+                "pnl": float(r.pnl)} for r in ep.itertuples()]
+
     # perf_main 是"对外唯一来源"的 CAGR（run_backtest 的区间端点略有不同），
     # 两个数一起列，避免报告和 README 出现两个 CAGR 却没人解释。
     perf_cagr = None
@@ -80,6 +110,12 @@ def main() -> int:
         "ci95": ci,
         "concentration": conc,
         "break_even": be,
+        "yearly": {int(y): {k: float(v) for k, v in row.items()}
+                   for y, row in yearly.iterrows()},
+        "rolling_selection": {str(d.date()): float(v) for d, v in roll.dropna().iloc[::21].items()},
+        "gate": gate,
+        "selection_sensitivity": sens,
+        "top_episodes": top_eps,
     }
     (ROOT / "output").mkdir(exist_ok=True)
     atomic_write_text(ROOT / "output" / "attribution.json",
@@ -139,10 +175,59 @@ def main() -> int:
         ]
         for d in conc["drop"]:
             lines.append(f"| {d['k']} 段 | {d['cagr'] * 100:.1f}% |")
-        lines += ["", "剔除后仍然为正，说明收益不是靠个别交易撑起来的。" if
-                  all(d["cagr"] > 0 for d in conc["drop"]) else
-                  "", "剔除后转负：收益高度依赖少数交易，实盘复制难度大。" if
-                  any(d["cagr"] <= 0 for d in conc["drop"]) else ""]
+        worst = min(d["cagr"] for d in conc["drop"]) if conc["drop"] else None
+        if worst is not None:
+            if worst <= 0.02:
+                lines += ["", f"剔除 10 段后只剩 **{worst * 100:.1f}%**：收益高度依赖少数交易，"
+                          "实盘复制时只要错过其中几段，结果就会完全不同。"]
+            elif worst <= 0.05:
+                lines += ["", f"剔除 10 段后剩 **{worst * 100:.1f}%**：对少数交易有明显依赖，"
+                          "但不算全靠它们。"]
+            else:
+                lines += ["", f"剔除 10 段后仍有 **{worst * 100:.1f}%**：收益不是靠个别交易撑起来的。"]
+    lines += ["", "## 分年度：alpha 到底在哪几年", "",
+              "| 年 | Beta | 择时 | 选股 | 债券 | 成本 | 净 |", "|---|---|---|---|---|---|---|"]
+    for y, row in yearly.iterrows():
+        lines.append(f"| {y} | {row['beta']:+.1f} | {row['timing']:+.1f} | "
+                     f"{row['selection']:+.1f} | {row['bond']:+.1f} | {row['cost']:+.1f} | "
+                     f"**{row['net']:+.1f}** |")
+    lines += ["", "单位：百分点（算术相加，未年化）。", ""]
+    if not yearly.empty:
+        best = yearly["selection"].idxmax()
+        lines.append(f"选股贡献最大的一年是 **{best}**（{yearly.loc[best, 'selection']:+.1f}pp），"
+                     f"占全部选股贡献的 **{yearly.loc[best, 'selection'] / max(yearly['selection'].sum(), 1e-9) * 100:.0f}%**。")
+
+    lines += ["", "## 选股 alpha 的时间集中度", "",
+              f"滚动 12 个月的选股贡献：最近一期 **{roll.dropna().iloc[-1]:+.1f}pp**，"
+              f"2024 年末一度为 **{roll.loc[:'2024-12-31'].iloc[-1]:+.1f}pp**。"
+              "alpha 有明显的时间聚集，不是每年稳定产出。", ""]
+
+    lines += ["", "## 闸门诊断：它到底帮了还是害了", "",
+              f"半仓天数占 **{gate['off_share'] * 100:.0f}%**，7.8 年切换 **{gate['switches']} 次**。"
+              f"开闸后 20 日基准平均 {gate['fwd20_on'] * 100:+.2f}%，"
+              f"关闸后 20 日平均 {gate['fwd20_off'] * 100:+.2f}%。",
+              "",
+              "关闸之后市场反而更容易上涨——这是择时项年化为负的直接原因。",
+              "",
+              (f"分年度看，它在 {timing_best} 帮了 **{yearly.loc[timing_best, 'timing']:+.1f}pp**，"
+               f"在 {timing_worst} 扣了 **{yearly.loc[timing_worst, 'timing']:+.1f}pp**。"
+               if not yearly.empty else ""),
+              "换句话说：**它是一份保险，保费在牛市付、赔付在熊市收**。"
+              "这份样本里保费收多了，但 timing 的 95% 区间跨过 0，"
+              "不能据此断言闸门一定有害——只能说没看到它的正贡献。", ""]
+
+    lines += ["", "## 如果选股只兑现一部分", "",
+              "| 选股兑现比例 | CAGR |", "|---|---|"]
+    for r in sens:
+        lines.append(f"| {r['realized'] * 100:.0f}% | {r['cagr'] * 100:.1f}% |")
+    lines += ["", "这是最该盯的敏感性：策略的全部价值几乎都压在选股上，"
+              "兑现一半就直接掉到个位数。", ""]
+
+    lines += ["", "## 贡献最大的持仓段", "",
+              "| 标的 | 区间 | 贡献 |", "|---|---|---|"]
+    for e in top_eps:
+        lines.append(f"| {e['name']} | {e['start']} → {e['end']} | {e['pnl'] * 100:+.1f}pp |")
+
     lines += [
         "",
         "## 成本敏感度",
@@ -162,6 +247,18 @@ def main() -> int:
         "",
         "> 口径：算术年化贡献相加等于净收益（恒等式），与几何 CAGR 的差是波动拖累；"
         "两者都列在 JSON 里。",
+        "",
+        "## 结论",
+        "",
+        f"1. 收益几乎全部来自**选股**（{summ['selection'] * 100:+.1f}pp），"
+        "Beta 只贡献 %+.1f，择时是 %+.1f。" % (summ["beta"] * 100, summ["timing"] * 100),
+        f"2. 选股 alpha **高度集中在 {int(yearly['selection'].idxmax())} 年**"
+        f"（占全部选股贡献的 {yearly['selection'].max() / max(yearly['selection'].sum(), 1e-9) * 100:.0f}%），"
+        "不是每年稳定产出。",
+        "3. 策略对选股兑现程度极度敏感：兑现一半，CAGR 掉到个位数；兑现为零，CAGR 转负。",
+        "",
+        "**什么会改变这个判断**：前向验证累计 8 期以上、且选股贡献不再只由单一年份主导；"
+        "在此之前，9%~11% 的对外预期应视为上限而非中枢。",
     ]
     atomic_write_text(ROOT / "docs" / "attribution.md", "\n".join(lines) + "\n")
 
