@@ -73,12 +73,8 @@ def ok(name: str, passed: bool, detail: str = "", info: str = "") -> None:
         FAIL.append(name)
 
 
-def main() -> None:
-    panel = load_panel(ROOT / "data" / "etf_pool.csv", ROOT / "data" / "cache", PANEL_START, END)
-    bench = benchmark_series(panel.close, "sh510300")
-    strat = TrendGatedAdaptive(panel)
-    targets = strat.generate()
-
+def audit_engine(panel, bench, strat, targets) -> None:
+    """A-F 节：回测引擎自检。全部依赖本地行情缓存（data/cache，不入库）。"""
     print("=" * 78)
     print("A. 交易成本是否被正确扣减")
     print("=" * 78)
@@ -226,6 +222,30 @@ def main() -> None:
     else:
         ok("面板提供 last_date", False, "Panel.last_date 缺失")
 
+    # 交给 main 的结尾摘要用（无缓存时摘要也会相应降级）
+    return nav, old_sharpe, new_sharpe
+
+
+def main() -> None:
+    # A-F 需要真实行情面板；output/*.csv 随仓库走、data/cache 不入库，
+    # 所以新克隆的仓库 / CI runner 上没有缓存。这时跳过 A-F、照常跑 G-L：
+    # 产物一致性与三端口径检查恰恰不需要行情数据。
+    try:
+        panel = load_panel(ROOT / "data" / "etf_pool.csv", ROOT / "data" / "cache", PANEL_START, END)
+        bench = benchmark_series(panel.close, "sh510300")
+        strat = TrendGatedAdaptive(panel)
+        targets = strat.generate()
+    except RuntimeError as exc:
+        print(f"[audit] 无本地行情缓存，A-F 节跳过（{exc}）；G-L 节照常执行")
+        engine_summary = None
+    else:
+        engine_summary = audit_engine(panel, bench, strat, targets)
+
+    # G 节也用 sig_fp / sig_date，但它们只依赖 output 文件，与面板无关；
+    # 在这里独立定义一份（audit_engine 内 F 节用的是带 nav fallback 的版本）。
+    sig_fp = sorted((ROOT / "output").glob("signal_*.csv"))
+    sig_date = pd.Timestamp(sig_fp[-1].stem.replace("signal_", "")) if sig_fp else None
+
     # ================= G. 信号与下单清单自洽 =================
     print("\n" + "=" * 78)
     print("G. 信号 / 下单清单")
@@ -238,19 +258,26 @@ def main() -> None:
         # 每行价格必须等于缓存里对应日期的真实收盘价。
         # 日期以 CSV 的「价格日期」列为准：信号钉在调仓日之后，参考价取的是
         # **数据截止日**收盘（下单时真正要付的价），两者可能相差几天。
-        bad = []
-        for _, r in sig.iterrows():
-            fp = ROOT / "data" / "cache" / "kline_qfq" / f"{r['代码']}.csv"
-            if not fp.exists():
-                bad.append((r["代码"], "无缓存"))
-                continue
-            want = pd.Timestamp(str(r.get("价格日期") or sig_date))
-            d = pd.read_csv(fp, index_col=0, parse_dates=True)
-            if want not in d.index:
-                bad.append((r["代码"], f"缺 {want.date()} 行情（止于 {d.index[-1].date()}）"))
-            elif abs(float(d.loc[want, "close"]) - float(r["最新价"])) > 0.002:
-                bad.append((r["代码"], f"价差 {float(d.loc[want, 'close'])} vs {r['最新价']}"))
-        ok("参考价 = 价格日期当日真实收盘价", not bad, str(bad[:3]))
+        # 这条校验需要行情缓存；CI / 新克隆环境没有，降级为 SKIP 而不是 FAIL——
+        # 第一轮 CI 就在这里红过：模拟无缓存时 260 只全部「无缓存」。
+        cache_dir = ROOT / "data" / "cache" / "kline_qfq"
+        have_cache = cache_dir.exists() and any(cache_dir.glob("*.csv"))
+        if have_cache:
+            bad = []
+            for _, r in sig.iterrows():
+                fp = cache_dir / f"{r['代码']}.csv"
+                if not fp.exists():
+                    bad.append((r["代码"], "无缓存"))
+                    continue
+                want = pd.Timestamp(str(r.get("价格日期") or sig_date))
+                d = pd.read_csv(fp, index_col=0, parse_dates=True)
+                if want not in d.index:
+                    bad.append((r["代码"], f"缺 {want.date()} 行情（止于 {d.index[-1].date()}）"))
+                elif abs(float(d.loc[want, "close"]) - float(r["最新价"])) > 0.002:
+                    bad.append((r["代码"], f"价差 {float(d.loc[want, 'close'])} vs {r['最新价']}"))
+            ok("参考价 = 价格日期当日真实收盘价", not bad, str(bad[:3]))
+        else:
+            print("  [SKIP] 参考价校验需要本地行情缓存（CI / 新克隆环境没有 data/cache）")
 
         # 前端整手取整逻辑复算：任意资金下总投入都不得超过本金
         def invest(cash: float) -> float:
@@ -275,7 +302,10 @@ def main() -> None:
     ok("能在绩效表里定位到 TGAR 行", not hit.empty, f"index={perf.index.tolist()[:2]}…")
     if not hit.empty:
         row = hit.iloc[0]
-        years = len(nav) / 252
+        # 年数从入库的 nav_main.csv 反推，不用回测面板的 nav——
+        # H 节必须能在没有行情缓存的机器（CI / 新克隆）上独立执行。
+        nav_main = pd.read_csv(ROOT / "output" / "nav_main.csv", index_col=0, parse_dates=True)
+        years = len(nav_main) / 252
         web_cost_yr = float(row["累计交易成本"]) / years
         print(f"  回测累计交易成本 {float(row['累计交易成本']):.2%}，折年 {web_cost_yr:.2%}")
         print(f"  换手 {float(row['年均换手(单边)']):.2f} × 2 × 0.10% = "
@@ -469,13 +499,21 @@ def main() -> None:
 
     mf = ROOT / "output" / "manifest.json"
     if mf.exists():
+        # manifest 的总指纹包含 data/cache 全部 260 个文件的哈希。
+        # 无缓存的环境（CI / 新克隆）算出的 inputs_sha 必然不同，
+        # 这条校验在那里没有意义，降级为 SKIP。
+        cache_dir = ROOT / "data" / "cache" / "kline_qfq"
+        have_cache = cache_dir.exists() and any(cache_dir.glob("*.csv"))
         try:
             stored = _json.loads(mf.read_text(encoding="utf-8"))
-            from scripts.manifest import build_manifest  # noqa: PLC0415
-            cur = build_manifest(ROOT)
-            ok("复现清单与当前输入/输出一致",
-               cur["inputs_sha"] == stored.get("inputs_sha"),
-               "数据或产物已变，跑 python -m etfquant manifest 刷新")
+            if not have_cache:
+                print("  [SKIP] manifest 复现校验包含行情缓存哈希，无缓存环境跳过")
+            else:
+                from scripts.manifest import build_manifest  # noqa: PLC0415
+                cur = build_manifest(ROOT)
+                ok("复现清单与当前输入/输出一致",
+                   cur["inputs_sha"] == stored.get("inputs_sha"),
+                   "数据或产物已变，跑 python -m etfquant manifest 刷新")
         except Exception as exc:  # noqa: BLE001
             ok("复现清单可复核", False, str(exc)[:60])
 
@@ -555,9 +593,18 @@ def main() -> None:
             print(f"    · {f}")
     else:
         print(f"  全部检查通过（{N_PASS} 项）")
-    print(f"\n  当前 TGAR：CAGR {metrics.cagr(nav):.2%} | MaxDD {metrics.max_drawdown(nav):.2%} "
-          f"| Sharpe(CAGR法) {old_sharpe:.3f} | Sharpe(标准) {new_sharpe:.3f}")
+    if engine_summary is not None:
+        nav, old_sharpe, new_sharpe = engine_summary
+        print(f"\n  当前 TGAR：CAGR {metrics.cagr(nav):.2%} | MaxDD {metrics.max_drawdown(nav):.2%} "
+              f"| Sharpe(CAGR法) {old_sharpe:.3f} | Sharpe(标准) {new_sharpe:.3f}")
+    else:
+        print("\n  当前 TGAR：A-F 节已跳过（无本地行情缓存），指标摘要不可用；"
+              "G-L 节的产物一致性检查不受影响")
+
+    # 有 FAIL 必须以非零退出：CI 的「口径审计」步骤靠退出码判红绿。
+    # 之前只打印不返回，FAIL 了 CI 也是绿的——假绿比红更危险。
+    return 1 if FAIL else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

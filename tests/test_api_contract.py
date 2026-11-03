@@ -65,3 +65,23 @@ def test_holdings_injects_leg_on_every_plan_row():
     for row in plan:
         assert isinstance(row, dict), "advise().plan 必须是 dict 列表"
         assert row.get("leg") in ("core", "sat"), f"{row.get('code')} 缺 leg"
+
+
+def test_portfolio_degrades_gracefully_without_kline_cache():
+    """缺行情缓存时 /api/portfolio 必须返回 error dict，不能抛异常。
+
+    2026-11-03 第一次在 GitHub Actions 上跑 CI 就红在这里：
+    output/*.csv 随仓库走、data/cache（260 只 × 8.8 年日线）不入库，
+    runner 上 load_panel 直接 RuntimeError → 500。
+    这不只影响 CI——新克隆的仓库、丢了缓存的便携版都会踩同一个坑。
+    """
+    from unittest import mock
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("缓存为空，请先运行 scripts/download_history.py")
+
+    with mock.patch("etfquant.pipeline.load_panel", boom):
+        out = S.api_portfolio()          # 抛异常即失败
+    assert isinstance(out, dict) and out.get("error"), (
+        "缺缓存时应返回 {'error': ...} 而不是抛异常或返回半截数据"
+    )

@@ -1635,10 +1635,16 @@ def api_portfolio() -> dict:
 
     from etfquant.pipeline import load_panel
 
-    panel = load_panel(
-        DATA / "etf_pool.csv", DATA / "cache",
-        str(w.index[0].date()), str(w.index[-1].date()),
-    )
+    # output/*.csv 随仓库走，data/cache（260 只 × 8.8 年日线）不入库。
+    # 新克隆的仓库或便携版缺缓存时，load_panel 会抛 RuntimeError——
+    # 不接住的话这一页是 500，而不是一句「先跑数据下载」。CI 上也是这样红的。
+    try:
+        panel = load_panel(
+            DATA / "etf_pool.csv", DATA / "cache",
+            str(w.index[0].date()), str(w.index[-1].date()),
+        )
+    except RuntimeError as exc:                      # 缓存为空等数据级错误
+        return {"error": f"回测持仓需要本地行情缓存：{exc}"}
     px = panel.close.reindex(columns=w.columns).ffill()
     ret = px.pct_change(fill_method=None).fillna(0.0)
     logret = np.log1p(ret.clip(lower=-0.999))
