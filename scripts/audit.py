@@ -381,8 +381,13 @@ def main() -> None:
                 names = [n for n in zf.namelist() if n.endswith("data.js")]
                 inner = zf.read(names[0]) if names else b""
             outer = dj_fp.read_bytes()
+            # 对比前把 CRLF/LF 归一：git 会在提交/检出时转换文本行尾，
+            # APK 内嵌的是打包时的原版字节。逐字节 md5 在 CI（检出 LF）上
+            # 永远对不上本机（CRLF 工作区）打进去的包，是纯假阳性；
+            # 而归一化后，data.js 真的内容变了（APK 忘了重打）依然抓得住。
+            norm = lambda b: b.replace(b"\r\n", b"\n")  # noqa: E731
             ok("APK 内嵌数据与源码 data.js 一致",
-               bool(inner) and hashlib.md5(inner).hexdigest() == hashlib.md5(outer).hexdigest(),
+               bool(inner) and hashlib.md5(norm(inner)).hexdigest() == hashlib.md5(norm(outer)).hexdigest(),
                "不一致就重跑 android/build.sh（顺手升 versionCode）")
         except (OSError, zipfile.BadZipFile) as exc:
             ok("APK 可读取", False, str(exc)[:60])
@@ -475,8 +480,13 @@ def main() -> None:
 
     pre = ROOT / "docs" / "pre_registration.md"
     prefp = ROOT / "data" / "pre_registration.sha256"
+    # 冻结 hash 一律对「行尾归一化后」的内容计算：git 会转换文本行尾，
+    # CI 检出的字节可能与冻结时不一致，逐字节 hash 在那里是假阳性。
+    def frozen_hash(fp: Path) -> str:
+        return _hash.sha256(fp.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+
     if pre.exists() and prefp.exists():
-        cur = _hash.sha256(pre.read_bytes()).hexdigest()
+        cur = frozen_hash(pre)
         ok("预注册文档未被改动（hash 冻结）",
            prefp.read_text(encoding="utf-8").strip() == cur,
            "docs/pre_registration.md 被改过但 data/pre_registration.sha256 没同步")
@@ -492,7 +502,7 @@ def main() -> None:
             hfp = ROOT / "data" / (md.stem + ".sha256")
             if not hfp.exists():
                 stale.append(f"{md.stem} 缺 hash")
-            elif hfp.read_text(encoding="utf-8").strip() != _hash.sha256(md.read_bytes()).hexdigest():
+            elif hfp.read_text(encoding="utf-8").strip() != frozen_hash(md):
                 stale.append(f"{md.stem} 已在冻结后被改动")
         ok("试验级预注册 hash 全部匹配", not stale, "；".join(stale),
            f"{len(pregs)} 份试验预注册冻结有效")
