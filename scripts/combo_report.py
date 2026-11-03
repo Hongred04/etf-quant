@@ -61,9 +61,10 @@ def main() -> int:
               f"{row['sharpe']:8.2f}{row['calmar']:8.2f}{row['turnover']:7.1f}")
 
     # 滚动 12 个月：组合是否稳定优于纯卫星
+    PICK = 0.5   # 与默认 --core-weight 保持一致，否则卡片上的胜率是另一档配置的
     nav_sat = Backtester(panel.close, panel.open_).run(satellite, start=START).nav
     nav_mix = Backtester(panel.close, panel.open_).run(
-        C.blend_targets(satellite, 0.6, core), start=START).nav
+        C.blend_targets(satellite, PICK, core), start=START).nav
     roll = []
     for i in range(252, len(nav_sat) + 1, 21):
         a, b = nav_sat.iloc[i - 252:i], nav_mix.iloc[i - 252:i]
@@ -102,7 +103,6 @@ def main() -> int:
                       json.dumps(payload, ensure_ascii=False, indent=2))
 
     base = next(r for r in rows if r["core_weight"] == 0.0)
-    PICK = 0.5   # 回撤 −19.4% 达标且有余量，收益损失最小
     pick = next(r for r in rows if r["core_weight"] == PICK)
     core_only = rows[-1]
 

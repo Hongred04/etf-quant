@@ -1926,3 +1926,34 @@ html[data-theme="light"] .kpanel__legend { color: var(--txt-3); }
   vertical-align: 1px;
   white-space: nowrap;
 }
+
+/* 总览页「当前配置」卡片：四项组合口径指标 */
+.combo-card { border-color: var(--line-2); }
+.combo-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 18px;
+}
+.combo-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-left: 12px;
+  border-left: 2px solid var(--line-2);
+}
+.combo-stats span { font-size: 11.5px; color: var(--txt-3); letter-spacing: 0.02em; }
+.combo-stats b {
+  font-size: 20px;
+  font-weight: 640;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.combo-stats em {
+  font-size: 11px;
+  font-style: normal;
+  color: var(--txt-3);
+}
+@media (max-width: 860px) {
+  .combo-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .combo-stats b { font-size: 17px; }
+}

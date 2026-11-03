@@ -477,6 +477,40 @@ def api_overview() -> dict:
             "self": M.underwater_stats(nav_self),
             "bench": M.underwater_stats(nav_bench) if nav_bench is not None else None,
         },
+        # 当前生效的配置：核心-卫星比例 + 该配置的回测指标。
+        # KPI 卡片展示的是**卫星腿单独**的绩效，与实际执行的组合不是一回事；
+        # 不给出组合口径，用户会以为自己的回撤预期是 -35%。
+        "combo": _combo_summary(),
+    }
+
+
+def _combo_summary() -> dict | None:
+    """读 output/combo.json（由 scripts/combo_report.py 生成）与当前 core_weight。"""
+    fp = OUT / "combo.json"
+    if not fp.exists():
+        return None
+    try:
+        data = json.loads(fp.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    cw = 0.0
+    try:
+        meta = json.loads((OUT / "signal_meta.json").read_text(encoding="utf-8"))
+        cw = float(meta.get("core_weight") or 0.0)
+    except (OSError, ValueError):
+        pass
+    rows = data.get("configs") or []
+    # 取与当前 core_weight 最接近的一档
+    pick = min(rows, key=lambda r: abs(float(r.get("core_weight", 0)) - cw)) if rows else None
+    base = next((r for r in rows if float(r.get("core_weight", -1)) == 0.0), None)
+    return {
+        "core_weight": cw,
+        "start": data.get("start"),
+        "end": data.get("end"),
+        "active": pick,
+        "satellite": base,
+        "corr": data.get("corr"),
+        "rolling": data.get("rolling"),
     }
 
 
@@ -938,6 +972,22 @@ def api_holdings() -> dict:
     sig = _cached("signal", 5, api_signal)
     sig_rows = (sig or {}).get("rows") or []
     plan = H.advise(valued, sig_rows)
+
+    # 核心腿标记：持有页与调仓建议都要能区分"每期固定持有"和"会被换掉"。
+    # 信号里已有 leg 字段，这里按代码注入，避免两套口径。
+    leg_map = {str(r.get("code")): r.get("leg", "sat") for r in sig_rows}
+    for _it in valued.get("items") or []:
+        _it["leg"] = leg_map.get(str(_it.get("code")), "sat")
+    for _p in plan or []:
+        _p["leg"] = leg_map.get(str(_p.get("code")), "sat")
+
+    # 核心腿标记：持有页与调仓建议都要能区分"每期固定持有"和"会被换掉"。
+    # 信号里已有 leg 字段，这里按代码注入，避免两套口径。
+    leg_map = {str(r.get("code")): r.get("leg", "sat") for r in sig_rows}
+    for _it in valued.get("items") or []:
+        _it["leg"] = leg_map.get(str(_it.get("code")), "sat")
+    for _p in plan or []:
+        _p["leg"] = leg_map.get(str(_p.get("code")), "sat")
 
     # 池子里有哪些代码/名称，前端做输入联想用（只给代码与名称，不带行情）
     known = {c: v["name"] for c, v in meta.items()}

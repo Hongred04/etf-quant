@@ -469,6 +469,11 @@
       const bondShare = sig.rows
         .filter((r) => r.category === "债券")
         .reduce((s, r) => s + (+r.share || 0), 0) / tw;
+      // 组合口径下，"权益/债券"不足以描述仓位：核心腿是不择时的红利低波，
+      // 卫星腿才受闸门控制。这里按 leg 汇总，用户才知道哪部分会被换掉。
+      const coreShare = sig.rows
+        .filter((r) => r.leg === "core")
+        .reduce((s, r) => s + (+r.share || 0), 0) / tw;
       const STATE = {
         holding: ["ok", "持有中 · 今天不用操作", `下次换仓 ${sig.next_reb || "—"} 收盘后再来`],
         exec_today: ["act", "今天开盘执行调仓", "先买债券，再按占比从大到小"],
@@ -481,7 +486,9 @@
         <span class="ss-dot"></span>
         <b>${esc(title)}</b>
         <span class="ss-sub">${esc(sub)}</span>
-        <span class="ss-pos">权益 ${pct(1 - bondShare, 0)} · 债券 ${pct(bondShare, 0)}</span>
+        <span class="ss-pos">${coreShare > 0.01
+          ? `核心 ${pct(coreShare, 0)} · 卫星 ${pct(1 - coreShare, 0)}（含债券 ${pct(bondShare, 0)}）`
+          : `权益 ${pct(1 - bondShare, 0)} · 债券 ${pct(bondShare, 0)}`}</span>
         <a class="ss-link" href="#signal">查看清单 →</a>
       </div>`;
     }
@@ -500,8 +507,35 @@
         + `${uw.max_end ? " → " + uw.max_end.slice(0, 7) : " 至今"}）`
       : "";
 
+    // 组合口径：KPI 是卫星腿单独的绩效，与实际执行的组合不同。
+    // 不把这件事摆在最上面，用户会以为自己的回撤预期是卫星腿那个数。
+    const cb = d.combo;
+    const comboCard = cb && cb.active ? `
+      <div class="card reveal combo-card">
+        <div class="card-head"><div>
+          <div class="card-title">当前配置 · 核心-卫星</div>
+          <div class="card-sub">核心腿不择时、每期等权重置；卫星腿按信号轮动。回测 ${esc(cb.start || "")} 起，含成本</div>
+        </div><span class="tag">核心 ${pct(cb.core_weight, 0)} · 卫星 ${pct(1 - cb.core_weight, 0)}</span></div>
+        <div class="card-body">
+          <div class="combo-stats">
+            <div><span>组合年化</span><b class="${cls(cb.active.cagr)}">${pct(cb.active.cagr)}</b>
+              <em>卫星腿单独 ${pct(cb.satellite?.cagr)}</em></div>
+            <div><span>组合最大回撤</span><b class="down">${pct(cb.active.mdd)}</b>
+              <em>卫星腿单独 ${pct(cb.satellite?.mdd)}</em></div>
+            <div><span>组合卡玛</span><b>${num(cb.active.calmar)}</b>
+              <em>卫星腿 ${num(cb.satellite?.calmar)}</em></div>
+            <div><span>与卫星腿相关性</span><b>${num(cb.corr, 2)}</b>
+              <em>滚动 12 月 Calmar 胜率 ${pct(cb.rolling?.share, 0)}</em></div>
+          </div>
+          <div class="note mt"><div>下面 6 个 KPI 与净值曲线是<b>卫星腿（TGAR）单独</b>的回测，
+            用来说明选股能力；<b>你实际执行的是上表的组合口径</b>——回撤预期看这里的 −19%，
+            不是下面的 −35%。推导与分段验证见 <code>docs/combo.md</code>。</div></div>
+        </div>
+      </div>` : "";
+
     view.innerHTML = `
       ${strip}
+      ${comboCard}
       <div class="kpi-grid">
         ${kpiCard("累计收益", pct(self.cum, 1), `沪深300 ${pct(bench.cum ?? 0, 1)}`, cls(self.cum),
           "回测区间内的总收益率：1 元最终变成多少元。这里不含年化，区间越长数值自然越大。")}
@@ -1264,7 +1298,8 @@
         const live = r.live ? `<span class="live-dot" title="盘中实时价"></span>` : "";
         return `<tr>
           <td class="cell-name">
-            <div class="nm kopen" data-kcode="${esc(r.code)}">${esc(r.name)}</div>
+            <div class="nm kopen" data-kcode="${esc(r.code)}">${esc(r.name)}${r.leg === "core"
+              ? '<span class="leg-tag" title="核心腿：每期等权重置，不随信号换出">核心</span>' : ""}</div>
             <div class="sub"><span class="mono">${esc(r.code)}</span>${live}
               ${r.buy_date ? `<span>${esc(r.buy_date)} 买入</span>` : ""}
               ${r.note ? `<span>· ${esc(r.note)}</span>` : ""}</div>
@@ -1312,7 +1347,8 @@
         const ACT_TEXT = { add: "加仓", cut: "减仓", exit: "清仓" };
         const actCls = { add: "up", cut: "down", exit: "down" };
         const arows = acts.map((p) => `<tr>
-          <td class="cell-name"><div class="nm kopen" data-kcode="${esc(p.code)}">${esc(p.name)}</div>
+          <td class="cell-name"><div class="nm kopen" data-kcode="${esc(p.code)}">${esc(p.name)}${p.leg === "core"
+              ? '<span class="leg-tag">核心</span>' : ""}</div>
             <div class="sub"><span class="mono">${esc(p.code)}</span></div></td>
           <td class="num">${pct(p.target_weight, 1)}</td>
           <td class="num">${pct(p.actual_weight, 1)}</td>
@@ -1601,33 +1637,51 @@
   function renderStrategy() {
     const layers = [
       {
-        t: "第一步：判断大盘强弱，决定用几成仓位",
+        t: "先分两笔钱：核心 50% + 卫星 50%",
+        d: "这是 2026-11 起的默认配置。原因是纯动量策略的最大回撤是 −35%，"
+          + "而所有止损、熔断、降仓位的办法都只能「用收益换波动」——"
+          + "降到同样的回撤，年化从 12.8% 掉到 6.9%。真正有效的是加一笔走势不同步的钱："
+          + "红利低波与动量腿的日收益相关性只有 0.23。",
+        c: [
+          "核心 50% → 4 只红利低波 ETF 等权（512890 / 515450 / 515300 / 159307）",
+          "              不择时、每期等权重置，与卫星腿相关性 0.23",
+          "卫星 50% → 下面第一到第五步的动量轮动",
+          "",
+          "效果：年化 12.0%、最大回撤 −19.4%（纯卫星是 12.8% / −35.1%）",
+          "       78 个滚动 12 个月窗口里，组合卡玛有 88% 优于纯卫星",
+        ].join("\n"),
+      },
+      {
+        t: "卫星 · 第一步：判断大盘强弱，决定用几成仓位",
         d: "先看沪深300 站在均线上方还是下方。三项条件各得一点分，加起来 0~1 分：分高说明趋势好，可以重仓；分低说明在下跌，把权益减到一半，其余买债券。",
         c: "大盘强弱分 = 0.4 × (站上200日线?) + 0.3 × (站上60日线?) + 0.3 × (近20日上涨?)\n\n分数 ≥ 0.7 → 权益 100%\n分数 < 0.7 → 权益 50%（其余买债券，账户仍满仓、不空仓）",
       },
       {
-        t: "第二步：剔除不合格的 ETF，只留下能买的",
+        t: "卫星 · 第二步：剔除不合格的 ETF，只留下能买的",
         d: "四条硬性门槛，分别过滤掉：刚上市没历史数据的、成交太冷清买不进卖不出的、还在下跌趋势里的、以及短期被爆炒过热的。",
         c: "① 上市满 250 个交易日        → 保证 200 日均线算得出来\n② 近 20 日日均成交额 ≥ 2000 万 → 保证买得进、卖得掉\n③ 收盘价在 60 日均线上方      → 只买上升趋势，不抄底\n④ 量比(5日/60日成交量) < 3    → 剔除成交突然放大的拥挤品种",
       },
       {
-        t: "第三步：给剩下的打分，看谁最强",
+        t: "卫星 · 第三步：给剩下的打分，看谁最强",
         d: "只用一个指标排序：近 20 个交易日的涨幅。但故意去掉最近 5 个交易日，因为短期急涨往往随后回吐，去掉后更能反映真实强度。",
         c: "按「近20日涨幅（剔除最近5日）」从高到低排序\n\n说明：实验证明加入中期动量、低波动等因子反而更差，\n      因为 A 股行业轮动周期只有 3~8 周，慢因子会错过行情。",
       },
       {
-        t: "第四步：买前 3 名，每只等额",
+        t: "卫星 · 第四步：买前 3 名，每只等额",
         d: "取分数最高的 3 只，资金平均分配，单只最多不超过 45%，避免押注过度集中。",
         c: "取前 3 名 · 每只 1/3 仓位 · 单只上限 45%",
       },
       {
-        t: "第五步：少折腾，控住回撤",
+        t: "卫星 · 第五步：少折腾，控住回撤",
         d: "频繁换手会被成本吃掉收益，所以给已有持仓一个「缓冲」：只要还排在前 6 名就继续拿着，不必因为掉出前 3 就立刻卖出。",
         c: "缓冲规则：持仓仍在前6名 → 继续持有（不必卖出）\n调仓频率：每 5 个交易日一次，次日开盘执行\n回撤熔断：已关闭（实验证明它在底部减仓，反而越抄越跌）",
       },
     ];
 
     const conditions = [
+      ["核心腿", "4 只红利低波 ETF 等权，不择时", "与动量腿相关性仅 0.23"],
+      ["核心腿调仓", "每个调仓日等权重置", "偏离很小，换手近零"],
+      ["卫星腿权重", "占 50%（可调 0~100%）", "决定回撤与收益的取舍"],
       ["标的范围", "沪深 ETF，剔除货币，同指数只留成交额最大者", "避免同质重复暴露"],
       ["上市时长", "≥ 250 个交易日", "因子可算，规避次新炒作"],
       ["流动性", "20 日均成交额 ≥ 2000 万元", "容纳实盘冲击成本"],
@@ -1644,7 +1698,7 @@
       <div class="card reveal">
         <div class="card-head">
           <div>
-            <div class="card-title">TGAR · 趋势闸门自适应轮动</div>
+            <div class="card-title">核心-卫星 · 红利低波打底 + 动量轮动进攻</div>
             <div class="card-sub"></div>
           </div>
         </div>
