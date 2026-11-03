@@ -978,7 +978,9 @@ def api_holdings() -> dict:
     leg_map = {str(r.get("code")): r.get("leg", "sat") for r in sig_rows}
     for _it in valued.get("items") or []:
         _it["leg"] = leg_map.get(str(_it.get("code")), "sat")
-    for _p in plan or []:
+    # advise() 返回的是 dict（plan / needs_action / buy_value / sell_value），
+    # 不是列表——直接遍历拿到的是字典的 key，会抛 AttributeError。
+    for _p in (plan or {}).get("plan") or []:
         _p["leg"] = leg_map.get(str(_p.get("code")), "sat")
 
     # 核心腿标记：持有页与调仓建议都要能区分"每期固定持有"和"会被换掉"。
@@ -986,7 +988,9 @@ def api_holdings() -> dict:
     leg_map = {str(r.get("code")): r.get("leg", "sat") for r in sig_rows}
     for _it in valued.get("items") or []:
         _it["leg"] = leg_map.get(str(_it.get("code")), "sat")
-    for _p in plan or []:
+    # advise() 返回的是 dict（plan / needs_action / buy_value / sell_value），
+    # 不是列表——直接遍历拿到的是字典的 key，会抛 AttributeError。
+    for _p in (plan or {}).get("plan") or []:
         _p["leg"] = leg_map.get(str(_p.get("code")), "sat")
 
     # 池子里有哪些代码/名称，前端做输入联想用（只给代码与名称，不带行情）

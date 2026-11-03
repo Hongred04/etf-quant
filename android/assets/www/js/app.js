@@ -996,7 +996,7 @@
       maxAbs = Math.max(maxAbs, Math.abs(annual[SELF][y] || 0), Math.abs(annual[BENCH][y] || 0));
     });
     html += '<div class="section-label">年度收益<span class="legend">' +
-      '<span><i style="background:var(--accent)"></i>TGAR</span>' +
+      '<span><i style="background:var(--accent)"></i>卫星腿</span>' +
       '<span><i style="background:var(--txt-3)"></i>沪深300</span></span></div>';
     html += '<div class="card"><div class="bars">';
     years.forEach(function (y) {
@@ -2025,14 +2025,14 @@
       out += '<div class="row"><div class="row__main"><div class="row__name">' + y + ' 年</div>' +
         '<div class="row__meta">沪深300 ' + (isNum(b) ? b.toFixed(1) + "%" : "—") + '</div></div>' +
         '<div class="row__value"><b class="' + cls(a) + '">' + (isNum(a) ? (a > 0 ? "+" : "") + a.toFixed(1) + "%" : "—") + '</b>' +
-        '<small>TGAR</small></div></div>';
+        '<small>卫星腿</small></div></div>';
     });
     return out;
   }
 
   function shortCol(c) {
     return c.replace("年化收益(CAGR)", "年化").replace("_CAGR", "_年化")
-      .replace("最终模型", "TGAR").replace("纯动量", "纯动量")
+      .replace("最终模型", "卫星腿").replace("纯动量", "纯动量")
       .replace("最大回撤", "回撤").replace("_MaxDD", "_回撤").replace("基准", "基准");
   }
   function isPctCol(c) { return /收益|回撤|MaxDD|波动|胜率|CAGR/.test(c); }
