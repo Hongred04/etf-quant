@@ -462,7 +462,7 @@ def main() -> None:
     }
     RESEARCH = {"placebo", "chan", "dual_mom", "resid_mom", "macross", "meta",
                 "shares", "alpha_track", "slow_gate"}
-    TOOLS = {"diagnostics", "overfit", "monthly"}
+    TOOLS = {"diagnostics", "attribution", "overfit", "monthly"}
     # 有意保留的例外（写进 strategy 的 docstring，不是漏网）：
     ALLOWED = {("strategy", "secondary")}
 

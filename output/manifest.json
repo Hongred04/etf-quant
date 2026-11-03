@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-11-02 15:45",
+  "generated_at": "2026-11-03 09:45",
   "n_cache_files": 305,
-  "inputs_sha": "0841b6c9495e8f905d102e53f42f3cb03de895f8bd3baaa152a655e03ea855cd",
+  "inputs_sha": "d23eced7b6b0edf15ee7fcfbd5501b2346a634df2712ff2ef8e2ab0868e64eaf",
   "inputs": {
     "data/etf_pool.csv": "8732a263fc21e534d3d28f30ed266adc67929250cf4091a4c64f092186c86a3b",
     "data/cache/kline_qfq/sh510050.csv": "854ac30dc42ed3e816734550ed6702297c61b295ef4b16ba98724b95c15d2331",
@@ -311,10 +311,10 @@
     "data/cache/kline_qfq/sz159998.csv": "353f5c7e04525b474c5479da1d3d75c9c23838667debf20dd935d71df396fb64"
   },
   "outputs": {
-    "output/nav_main.csv": "6d382f01e49ea9e1d8d9ed160e4243d29a5eb7ba269dc126715e51d56922f4c3",
-    "output/perf_main.csv": "e15f770467dd4d1d09225c313de22a22ee9d1d9cabafadca105ab41fa6446ab2",
+    "output/nav_main.csv": "0d9d58f31f6a4c9d584e1c6679e56bcaf8b2a2df7db98cf62a8e3c08788c2987",
+    "output/perf_main.csv": "2962e574c971d95ccc41e4b01b9545a36db06609c32225ed4c4401c1016855ec",
     "output/diagnostics.json": "d064ae624678731e4100a9a79b8e3cbb1d1440794b8905cea2131a31edf5d8ab",
-    "output/overfit_summary.json": "67b2bbf17a2c8989b603b47fdb33e8359e96d86508e57d9d4f6ec4aebc71f1cf",
+    "output/overfit_summary.json": "0b4185d63d321d3d0dede9d7207f69fde550cc035d8139b2bbb8b7cd8b186015",
     "output/dsr.json": "7f7ec9b07464559748ce4022f5148613cee327251aac34a15a1a5384e649b9b0"
   }
 }

@@ -62,7 +62,8 @@
 | `io_utils` | 生产 | 原子写（CSV/文本） | 全部落盘处 |
 | `cli` | 生产 | 命令行入口（`python -m etfquant <cmd>`） | 人 |
 | `__main__` | 生产 | `python -m etfquant` 的引导（转 cli） | 人 |
-| `diagnostics` | 工具 | 深度诊断：归因、执行缺口、容量、bootstrap、IC | deep_check、audit |
+| `diagnostics` | 工具 | 深度诊断：因子回归（alpha vs mkt/mom/smb）、执行缺口、容量、bootstrap、IC | deep_check、audit |
+| `attribution` | 工具 | 会计式收益拆解：Beta / 择时 / 选股 / 债券 / 成本，依赖 `BacktestResult.daily` | attribution 脚本 |
 | `overfit` | 工具 | 过拟合体检：PBO / CSCV / 滚动前向 | overfit_check、dsr |
 | `monthly` | 工具 | 前向验证月报（对着预注册停止条件打分） | monthly_report |
 | `placebo` | 研究 | 随机对照：同候选集/敞口/费率的安慰剂策略 | research |

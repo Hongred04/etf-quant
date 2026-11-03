@@ -1,17 +1,17 @@
 {
   "n_variants": 29,
-  "n_days": 1894,
-  "pbo": 0.432,
-  "is_sharpe_median": 0.8975,
-  "oos_sharpe_median": 0.6677,
-  "best_variant": "minamt1e7",
-  "best_cagr": 0.2019,
-  "best_sharpe": 0.7807,
+  "n_days": 1897,
+  "pbo": 0.574,
+  "is_sharpe_median": 0.7265,
+  "oos_sharpe_median": 0.464,
+  "best_variant": "weight_invvol",
+  "best_cagr": 0.145,
+  "best_sharpe": 0.5988,
   "default_rank": 5,
-  "dsr_best": 0.948,
-  "dsr_default": 0.9188,
-  "wf_cagr": 0.1262,
-  "wf_fixed_cagr": 0.1541,
+  "dsr_best": 0.8744,
+  "dsr_default": 0.8284,
+  "wf_cagr": 0.1034,
+  "wf_fixed_cagr": 0.0968,
   "wf_windows": 11,
   "wf_picked": [
     "rmid0.6",
@@ -19,23 +19,23 @@
     "freq10",
     "freq10",
     "freq10",
-    "top2",
-    "score_multi",
-    "score_multi",
+    "buffer3",
+    "buffer3",
     "buffer1",
-    "score_multi",
-    "vr2"
+    "buffer1",
+    "buffer1",
+    "top4"
   ],
   "expectation": {
     "band": [
-      0.11,
-      0.13
+      0.09,
+      0.11
     ],
-    "label": "11%~13%",
-    "anchor": 0.1262,
-    "sample": 0.1745,
-    "discount": 0.277,
-    "pbo": 0.432,
+    "label": "9%~11%",
+    "anchor": 0.1034,
+    "sample": 0.1244,
+    "discount": 0.169,
+    "pbo": 0.574,
     "n_variants": 29
   }
 }
