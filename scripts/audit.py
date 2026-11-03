@@ -458,7 +458,7 @@ def main() -> None:
     PROD = {
         "datafeed", "universe", "pipeline", "factors", "strategy", "backtest",
         "metrics", "report", "holdings", "track", "expectation", "secondary",
-        "rebalance", "io_utils", "cli", "__main__",
+        "rebalance", "io_utils", "cli", "__main__", "risk",
     }
     RESEARCH = {"placebo", "chan", "dual_mom", "resid_mom", "macross", "meta",
                 "shares", "alpha_track", "slow_gate"}

@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Callable
 
 import numpy as np
 import pandas as pd
@@ -58,6 +59,7 @@ class Backtester:
         slippage: float = 0.0007,
         cb_tickers: set[str] | None = None,
         cb_extra: float = 0.0,
+        overlay: "Callable[[pd.Timestamp, float, float], float] | None" = None,
     ):
         self.close = close.sort_index().ffill()
         self.open = (open_.sort_index().ffill() if open_ is not None else self.close)
@@ -66,6 +68,10 @@ class Backtester:
         # 默认 0：不影响任何既有回测。只在做敏感性测试时传入。
         self.cb_tickers = set(cb_tickers or ())
         self.cb_extra = float(cb_extra)
+        # 敞口覆盖：在每个执行日给出一个 [0,1] 的系数，乘在目标权重上。
+        # 默认 None → 系数 1.0，净值与不带该参数时逐位相同（有测试钉住）。
+        # 约定：overlay(date, nav, peak) 只能用当日及以前的信息（nav/peak 都是此刻已知的）。
+        self.overlay = overlay
 
     def _cb_turn(self, a: pd.Series, b: pd.Series, cols) -> float:
         """换手中来自跨境标的的单边部分。溢价损耗只发生在它们身上。"""
@@ -112,6 +118,7 @@ class Backtester:
 
         w = pd.Series(0.0, index=cols)
         nav = initial_cash
+        peak_nav = initial_cash
         navs, w_rows, turns, costs, hold_rows = [], [], [], [], []
         trade_rows: list[dict] = []
         daily_rows: list[dict] = []
@@ -144,6 +151,8 @@ class Backtester:
                 # 而且"扣成本不记收益"是单向偏低估。
                 if dt in exec_targets:
                     tgt = self._norm(exec_targets[dt])
+                    mult = float(self.overlay(dt, nav, peak_nav)) if self.overlay else 1.0
+                    tgt = tgt * max(0.0, min(1.0, mult))
                     # 必须先把目标权重对齐到全部标的再相减：
                     # tgt 只含非零权重的标的，直接 tgt - w 会让"已清仓标的"变成 NaN 被跳过，
                     # 从而漏算买入新标的与清仓的成交额，换手会被严重低估。
@@ -174,6 +183,7 @@ class Backtester:
                     daily_rows.append({"date": dt, "pr": 0.0, "gap": 0.0,
                                        "oc": 0.0, "kind": "exec", "w_oc": {}})
                 navs.append((dt, nav))
+                peak_nav = max(peak_nav, nav)
                 w_rows.append(w.copy())
                 hold_rows.append(self._snapshot(dt, w, px, nav))
                 continue
@@ -201,6 +211,8 @@ class Backtester:
 
                 # 2) 调仓到目标权重
                 tgt = self._norm(exec_targets[dt])
+                mult = float(self.overlay(dt, nav, peak_nav)) if self.overlay else 1.0
+                tgt = tgt * max(0.0, min(1.0, mult))
                 turn = 0.5 * float((tgt.reindex(cols).fillna(0.0) - w).abs().sum())
                 # 实际成交金额 = Σ|Δw| = 2 × 单边换手，成本按成交金额计
                 cb_turn = self._cb_turn(tgt.reindex(cols).fillna(0.0), w, cols)
@@ -229,6 +241,7 @@ class Backtester:
             if pr != -1.0:
                 w = (w * (1.0 + r) / (1.0 + pr)).reindex(cols).fillna(0.0)
             navs.append((dt, nav))
+            peak_nav = max(peak_nav, nav)
             w_rows.append(w.copy())
             hold_rows.append(self._snapshot(dt, w, px, nav))
 

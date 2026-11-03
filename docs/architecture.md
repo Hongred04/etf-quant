@@ -56,7 +56,8 @@
 | `report` | 生产 | HTML 研究报告生成（内联 SVG） | scripts |
 | `holdings` | 生产 | 实盘持仓：校验、整手建仓、浮动盈亏 | server |
 | `track` | 生产 | 实盘跟踪：信号归档 → 纸上净值 | server、scripts |
-| `expectation` | 生产 | 对外口径换算（样本内 → 11%~13%） | server、scripts、report |
+| `expectation` | 生产 | 对外口径换算（样本内 → 9%~11%） | server、scripts、report |
+| `risk` | 生产 | 风险预算：目标权重整体缩放（默认 1.0，环境变量/参数开启） | run_signal、run_backtest |
 | `secondary` | 生产 | 第二排序键（默认关闭，负结果留档） | strategy |
 | `rebalance` | 生产 | 调仓日历（解释清单为何不每天变） | server |
 | `io_utils` | 生产 | 原子写（CSV/文本） | 全部落盘处 |

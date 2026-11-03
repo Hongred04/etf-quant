@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT))
 
 from etfquant.io_utils import atomic_to_csv
 from etfquant.pipeline import load_panel
+from etfquant.risk import resolve_scale
 from etfquant.strategy import STRATEGY_REGISTRY, TrendGatedAdaptive
 from etfquant.rebalance import last_rebalance, schedule, trading_days_between
 from etfquant.universe import POOL_MODES, apply_pool
@@ -31,6 +32,8 @@ PANEL_START = "2018-01-02"
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--strategy", default="s4_tgar")
+    ap.add_argument("--risk-scale", type=float, default=None,
+                    help="风险预算系数（0.1~1.0）；默认读 ETF_RISK_SCALE 或 1.0")
     ap.add_argument("--date", default=None)
     ap.add_argument("--out", default=None)
     ap.add_argument("--no-archive", action="store_true", help="只出信号，不写归档")
@@ -76,6 +79,10 @@ def main() -> None:
     if not target:
         elig = strat.eligible_at(sig_date)
         target = strat.target_weights(sig_date, elig)
+    # 风险预算：把目标权重整体缩放，剩余留现金。默认 1.0，不改变现有行为。
+    k = resolve_scale(args.risk_scale)
+    if k < 1.0:
+        target = {tk: wt * k for tk, wt in target.items()}
     srt = pd.Series(target).sort_values(ascending=False)
 
     meta = panel.meta
@@ -153,6 +160,7 @@ def main() -> None:
         "days_to_next": int(gap),
         "held_days": int(held),
         "strategy": strat.name,
+        "risk_scale": k,
         "regime": float(strat.regime_at(sig_date)) if isinstance(strat, TrendGatedAdaptive) else None,
         "exposure": float(strat._exposure(strat.regime_at(sig_date)))
         if isinstance(strat, TrendGatedAdaptive) else None,
