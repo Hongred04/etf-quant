@@ -217,7 +217,26 @@ def _load_task_from_disk(tid: str) -> dict | None:
     meta["restored"] = True
     return meta
 
-def start_task(action: str) -> str:
+def _parse_core_weight(payload: dict) -> tuple[float | None, str | None]:
+    """从请求里取可选的 core_weight，返回 (值, 错误信息)。
+
+    界面上的「纯卫星 / 核心+卫星」开关靠它落到 `run_signal.py --core-weight`：
+    0 = 纯进攻，0.5 = 一半底仓。这里只做校验，越界必须明确拒绝——
+    静默夹到边界会让用户以为自己切到了另一种模式，实际没有。
+    """
+    cw = payload.get("core_weight")
+    if cw is None:
+        return None, None
+    try:
+        val = float(cw)
+    except (TypeError, ValueError):
+        return None, f"core_weight 不是数字：{cw!r}"
+    if not (0.0 <= val <= 1.0):
+        return None, "core_weight 应在 0~1 之间"
+    return val, None
+
+
+def start_task(action: str, core_weight: float | None = None) -> str:
     spec = ACTIONS[action]
     # 组合任务：按顺序跑多个脚本（更新行情 → 重跑回测 → 重算信号）。
     # 单步任务统一看成只有一步的列表，后面只有一条执行路径。
@@ -255,7 +274,13 @@ def start_task(action: str) -> str:
             TASKS[tid]["status"] = "error"
             TASKS[tid]["duration"] = round(time.time() - TASKS[tid]["started"], 1)
             return 2
-        cmd = [sys.executable, str(SCRIPTS / step_spec["script"]), *step_spec["args"]]
+        # 模式切换：界面上的「纯卫星 / 核心+卫星」靠覆盖 run_signal 的 --core-weight
+        # 落地。只影响信号这一环——各档组合的回测结果早就都在 combo.json 里，
+        # 不需要为此重跑回测（那是 45 秒 vs 15 秒的差别）。
+        args = list(step_spec["args"])
+        if core_weight is not None and step_spec["script"] == "run_signal.py":
+            args = ["--core-weight", f"{core_weight:g}"]
+        cmd = [sys.executable, str(SCRIPTS / step_spec["script"]), *args]
         timed_out = threading.Event()
 
         def _kill() -> None:
@@ -759,6 +784,8 @@ def api_signal() -> dict:
         "bond_weight": meta.get("bond_weight", sum(r["weight"] for r in rows
                                                    if r["category"] == "债券")),
         "note": meta.get("note", ""),
+        # 当前模式：界面据此高亮「纯卫星 / 核心+卫星」开关
+        "core_weight": float(meta.get("core_weight") or 0.0),
     }
 
 
@@ -2146,12 +2173,16 @@ class Handler(BaseHTTPRequestHandler):
             action = payload.get("action", "")
             if action not in ACTIONS:
                 return self._json({"error": f"未知任务：{action}"}, 400)
+            # 可选的模式覆盖：界面切换「纯卫星(0) / 核心+卫星(0.5)」时带上
+            cw, err = _parse_core_weight(payload)
+            if err:
+                return self._json({"error": err}, 400)
             with TASK_LOCK:
                 for tid, t in TASKS.items():
                     if t["action"] == action and t["status"] == "running":
                         return self._json({"task_id": tid, "reused": True})
             try:
-                tid = start_task(action)
+                tid = start_task(action, core_weight=cw)
                 if action == "refresh":
                     mark_auto_attempt()
                 return self._json({"task_id": tid})

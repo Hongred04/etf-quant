@@ -254,6 +254,40 @@ html, body {
   padding-bottom: 2px;
 }
 
+/* 模式开关：一个分段控件，两个状态
+   视觉上必须"一眼看出当前是哪个"，所以选中态用实心而不是描边。 */
+.mode-switch {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border-radius: 9px;
+  background: var(--panel-3);
+  border: 1px solid var(--line-2);
+}
+.mode-switch button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--txt-3);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 11px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background .16s, color .16s;
+  white-space: nowrap;
+}
+.mode-switch button:hover { color: var(--txt); }
+.mode-switch button.is-on {
+  background: var(--panel);
+  color: var(--txt);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .18);
+}
+.mode-switch.is-busy { opacity: .55; pointer-events: none; }
+@media (max-width: 760px) {
+  .mode-switch button { padding: 4px 8px; font-size: 11px; }
+}
+
 /* ---------------------------------------------------------- 按钮 */
 .btn {
   display: inline-flex;
@@ -1974,6 +2008,104 @@ html[data-theme="light"] .kpanel__legend { color: var(--txt-3); }
   font-style: normal;
   color: var(--txt-3);
 }
+
+/* ---------------------------------------------------------- 总览成绩单 */
+/* 四格：一年赚多少 / 最坏跌多少 / 稳不稳 / 最长套多久。
+   每格下面一行"纯进攻仓是多少"做对照，让"多一半底仓值不值"一眼可比。 */
+.score-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 20px;
+}
+.score-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 13px;
+  border-left: 2px solid var(--line-2);
+}
+.score-grid span {
+  font-size: 11.5px;
+  color: var(--txt-3);
+}
+.score-grid b {
+  font-size: 25px;
+  font-weight: 650;
+  letter-spacing: -0.025em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+.score-grid em {
+  font-size: 11px;
+  font-style: normal;
+  color: var(--txt-3);
+}
+.score-note {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-2);
+  font-size: 12px;
+  color: var(--txt-2);
+  line-height: 1.7;
+}
+@media (max-width: 860px) {
+  .score-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .score-grid b { font-size: 21px; }
+}
+
+/* 一行式脚注：比 .note 卡轻，不抢视线 */
+.muted-line {
+  margin-top: 14px;
+  font-size: 11.5px;
+  line-height: 1.9;
+  color: var(--txt-3);
+}
+
+/* 步骤里的"具体怎么算"：默认收起，避免技术细节把正文挤没 */
+.rule-details { margin-top: 8px; }
+.rule-details > summary {
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--txt-3);
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  user-select: none;
+}
+.rule-details > summary::-webkit-details-marker { display: none; }
+.rule-details > summary::before {
+  content: "▸";
+  transition: transform .16s;
+  display: inline-block;
+}
+.rule-details[open] > summary::before { transform: rotate(90deg); }
+.rule-details > summary:hover { color: var(--txt-2); }
+.rule-details .layer-code { margin-top: 8px; }
+
+/* 折叠区：次要内容默认收起，不占首屏 */
+.more-card { padding: 0; overflow: hidden; }
+.more-card > summary {
+  padding: 13px 16px;
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--txt-2);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  user-select: none;
+}
+.more-card > summary::-webkit-details-marker { display: none; }
+.more-card > summary::before {
+  content: "▸";
+  color: var(--txt-3);
+  transition: transform .16s;
+}
+.more-card[open] > summary::before { transform: rotate(90deg); }
+.more-card > summary:hover { color: var(--txt); background: var(--panel-2); }
+.more-card .card { border: 0; background: transparent; box-shadow: none; margin: 0; }
+.more-card .card-head { padding-top: 0; }
 @media (max-width: 860px) {
   .combo-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
   .combo-stats b { font-size: 17px; }

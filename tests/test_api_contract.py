@@ -85,3 +85,27 @@ def test_portfolio_degrades_gracefully_without_kline_cache():
     assert isinstance(out, dict) and out.get("error"), (
         "缺缓存时应返回 {'error': ...} 而不是抛异常或返回半截数据"
     )
+
+
+def test_core_weight_override_is_validated():
+    """模式开关：core_weight 只接受 0~1，非法值必须明确拒绝而不是静默夹边。
+
+    界面上的「纯卫星 / 核心+卫星」切换靠这个字段落到 run_signal --core-weight。
+    静默改成 0.5 会让用户以为自己切了模式、实际没切——比报错更糟。
+    """
+    assert S._parse_core_weight({}) == (None, None)          # 不传 = 沿用默认
+    assert S._parse_core_weight({"core_weight": 0}) == (0.0, None)
+    assert S._parse_core_weight({"core_weight": "0.5"}) == (0.5, None)
+
+    for bad, why in [("abc", "数字"), (-0.1, "0~1"), (1.5, "0~1")]:
+        val, err = S._parse_core_weight({"core_weight": bad})
+        assert val is None and err and why in err, f"{bad!r} 应被拒绝：{val} {err}"
+
+
+def test_signal_payload_exposes_current_mode():
+    """前端靠 signal.core_weight 高亮开关，缺字段会让按钮永远显示默认态。"""
+    out = S.api_signal()
+    if out.get("error"):
+        pytest.skip(f"信号不可用：{out['error']}")
+    assert "core_weight" in out
+    assert 0.0 <= float(out["core_weight"]) <= 1.0
