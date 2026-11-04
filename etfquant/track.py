@@ -35,6 +35,9 @@ from .metrics import cagr, max_drawdown
 COLUMNS = [
     "signal_date", "exec_date", "code", "name", "category",
     "weight", "ref_price", "source", "created_at",
+    # 这一期是按哪套配置生成的（0=纯卫星，0.5=一半底仓）。旧归档没有这列，
+    # 读取时补成 None，回落到"归档里是否含核心代码"去推断。
+    "core_weight",
 ]
 
 
@@ -56,7 +59,8 @@ def load_archive(fp: str | Path) -> pd.DataFrame:
     return df[COLUMNS]
 
 
-def upsert_signal(fp: str | Path, rows: list[dict], source: str = "live") -> int:
+def upsert_signal(fp: str | Path, rows: list[dict], source: str = "live",
+                  core_weight: float | None = None) -> int:
     """
     写入一期信号。**同一 signal_date 整体替换**，重复生成不会叠加出两份。
 
@@ -73,7 +77,11 @@ def upsert_signal(fp: str | Path, rows: list[dict], source: str = "live") -> int
             return 0
         df = df[~same]
     created = datetime.now().replace(microsecond=0).isoformat()
-    new = pd.DataFrame([{**r, "source": source, "created_at": created} for r in rows])
+    new = pd.DataFrame([
+        {**r, "source": source, "created_at": created,
+         "core_weight": core_weight if core_weight is not None else r.get("core_weight")}
+        for r in rows
+    ])
     out = pd.concat([df, new[COLUMNS]], ignore_index=True)
     out = out.sort_values(["signal_date", "weight"], ascending=[True, False])
     atomic_to_csv(out, fp, index=False, encoding="utf-8-sig")
@@ -282,6 +290,14 @@ def archive_rows(out: pd.DataFrame, close: pd.DataFrame, sig_date: pd.Timestamp)
     return rows
 
 
+def _period_cw(rows: pd.DataFrame) -> float | None:
+    """这一期的 core_weight。旧归档没有该列，返回 None 交给上层推断。"""
+    if rows is None or rows.empty or "core_weight" not in rows.columns:
+        return None
+    v = pd.to_numeric(rows["core_weight"], errors="coerce").dropna()
+    return float(v.iloc[0]) if len(v) else None
+
+
 def build_track(panel, strategy_targets: dict, archived: pd.DataFrame,
                 core_codes: list[str] | None = None,
                 core_weight: float = 0.0) -> dict:
@@ -314,9 +330,22 @@ def build_track(panel, strategy_targets: dict, archived: pd.DataFrame,
         # 切换核心腿之前归档的期数不含核心腿，回测对照对这些期也要用纯卫星，
         # 否则 ref 会凭空多出 50% 的核心腿，与 paper 的偏差全是结构差异。
         core_set = set(core_codes)
+        # 优先用归档里显式记录的 core_weight；老归档没有这列时，退回"含不含核心代码"
+        # 的推断。前者能区分 0.3 / 0.5 这种"都含核心但比例不同"的期数——推断法做不到。
+        explicit = (pd.to_numeric(archived.get("core_weight"), errors="coerce")
+                    if "core_weight" in archived.columns else None)
+        by_date = (archived.assign(_cw=explicit).groupby("signal_date")["_cw"].max()
+                   if explicit is not None else pd.Series(dtype=float))
         has_core = archived.groupby("signal_date")["code"].apply(
             lambda col: any(str(c) in core_set for c in col))
-        legacy = {pd.Timestamp(str(d)) for d, v in has_core.items() if not v}
+        legacy = set()
+        for d, v in has_core.items():
+            cw = by_date.get(d)
+            if cw is None or pd.isna(cw):
+                if not v:                      # 无记录：按"没核心"推断
+                    legacy.add(pd.Timestamp(str(d)))
+            elif float(cw) <= 1e-9:            # 明确写了纯卫星
+                legacy.add(pd.Timestamp(str(d)))
         bt_targets = {
             d: (strategy_targets.get(d, {}) if d in legacy else w)
             for d, w in mixed.items()
@@ -342,6 +371,7 @@ def build_track(panel, strategy_targets: dict, archived: pd.DataFrame,
                 "signal_date": str(d.date()), "exec_date": "", "ret": None,
                 "cum": round(float(p_nav.iloc[-1] / float(p_nav.iloc[0]) - 1), 6),
                 "source": str(rows["source"].iloc[0]) if not rows.empty else "live",
+                "core_weight": _period_cw(rows),
                 "pending": True,
                 "holdings": [
                     {"code": str(r.code), "name": str(r.name), "weight": round(float(r.weight), 4),
@@ -360,6 +390,7 @@ def build_track(panel, strategy_targets: dict, archived: pd.DataFrame,
             # 用执行日净值会让人看到"最新一期累计 +9.6%、总收益 11.0%"两个对不上的数。
             "_cum_end": e1,
             "source": str(rows["source"].iloc[0]) if not rows.empty else "live",
+            "core_weight": _period_cw(rows),
             "holdings": [
                 {"code": str(r.code), "name": str(r.name), "weight": round(float(r.weight), 4),
                  "price": round(float(r.ref_price), 4) if pd.notna(r.ref_price) else None}

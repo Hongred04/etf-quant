@@ -755,9 +755,9 @@
   var TERMS = {
     cum: ["累计收益", "回测区间内的总收益率：1 元变成多少元。不含年化，区间越长数值自然越大。"],
     cagr: ["年化收益", "把总收益折算成<b>每年平均</b>的复合增长率，方便和存款、基金、指数等不同期限的产品横向比较。本项目按<b>日历天数</b>折算，A 股每年约 242 个交易日，用 252 会高估约 0.8pct。<br>大号数字是<b>样本内</b>结果（参数在同一段历史上挑过），可对外引用的预期要打折，见「验证」页顶部。"],
-    sharpe: ["夏普比率", "每承受 1 份波动能换来多少超额收益。<b>大于 1 优秀，0.5~1 可用，低于 0.5 一般</b>。衡量的是「赚得稳不稳」，不只是赚得多不多。"],
+    sharpe: ["稳不稳", "每承受 1 份波动能换来多少超额收益。<b>大于 1 优秀，0.5~1 可用，低于 0.5 一般</b>。衡量的是「赚得稳不稳」，不只是赚得多不多。"],
     mdd: ["最大回撤", "从历史最高点跌到最低点的<b>最大跌幅</b>，代表最坏情况下账户会缩水多少，是判断自己能不能拿得住的关键指标。"],
-    calmar: ["卡玛比率", "年化收益 ÷ 最大回撤。数值越高，说明<b>赚的钱相对承受的回撤越划算</b>。"],
+    calmar: ["收益回撤比", "年化收益 ÷ 最大回撤。数值越高，说明<b>赚的钱相对承受的回撤越划算</b>。"],
     excess: ["年化超额", "策略年化收益 − 沪深300 年化收益。正数代表跑赢。<b>不要用「累计超额 ÷ 年数」</b>，那不是年化口径。"],
     turnover: ["年均换手", "一年内大约换掉几倍仓位。<b>越高交易成本越大</b>，24 倍意味着每年换了 24 遍。"],
     cost: ["年化交易成本", "换手带来的摩擦成本，直接从净值里扣除。按双边 0.10% 计：换手 24.1 × 2 × 0.10% ≈ 4.8%。"],
@@ -961,7 +961,7 @@
       '<dl class="hero__foot">' +
         '<div class="hero__stat"><dt>年化' + qmark("cagr") + '</dt><dd>' + pct(self.cagr) + '</dd></div>' +
         '<div class="hero__stat"><dt>最大回撤' + qmark("mdd") + '</dt><dd>' + pct(self.mdd) + '</dd></div>' +
-        '<div class="hero__stat"><dt>夏普' + qmark("sharpe") + '</dt><dd>' + num(self.sharpe) + '</dd></div>' +
+        '<div class="hero__stat"><dt>稳不稳' + qmark("sharpe") + '</dt><dd>' + num(self.sharpe) + '</dd></div>' +
       '</dl>' +
     '</section>';
 
@@ -969,10 +969,9 @@
     var cb = OV.combo;
     if (cb && cb.active) {
       html += '<div class="combo-note">' +
-        '<b>当前配置：核心 ' + pct(cb.core_weight, 0) + ' · 卫星 ' + pct(1 - cb.core_weight, 0) + '</b>' +
-        '<span>组合年化 ' + pct(cb.active.cagr) + '、最大回撤 ' + pct(cb.active.mdd) +
-        '（卡玛 ' + num(cb.active.calmar) + '）。上面的收益与回撤是<b>卫星腿单独</b>的回测，' +
-        '你实际持有的是组合，回撤预期看这里。</span></div>';
+        '<b>底仓 ' + pct(cb.core_weight, 0) + ' · 进攻 ' + pct(1 - cb.core_weight, 0) + '</b>' +
+        '<span>组合 ' + pct(cb.active.cagr) + ' / ' + pct(cb.active.mdd) +
+        ' / ' + num(cb.active.calmar) + '</span></div>';
     }
 
     /* ---- 周期切换 ---- */
@@ -985,9 +984,7 @@
     /* ---- KPI ---- */
     html += '<div class="section-label">关键指标</div><div class="kpi-grid">' +
       kpi("年化超额", pct(self.cagr - bench.cagr, 1), "累计 " + pct(self.excess, 0), "excess", (self.cagr - bench.cagr) > 0 ? "up" : "down") +
-      kpi("卡玛比率", num(self.calmar), "收益 / 回撤", "calmar", "") +
       kpi("年均换手", num(self.turnover, 1) + " 倍", "每年换 " + num(self.turnover, 0) + " 遍", "turnover", "") +
-      kpi("信息比率", num(self.ir), "超额稳定性", "ir", "") +
     '</div>';
 
     /* ---- 年度收益 ---- */
@@ -996,7 +993,7 @@
       maxAbs = Math.max(maxAbs, Math.abs(annual[SELF][y] || 0), Math.abs(annual[BENCH][y] || 0));
     });
     html += '<div class="section-label">年度收益<span class="legend">' +
-      '<span><i style="background:var(--accent)"></i>卫星腿</span>' +
+      '<span><i style="background:var(--accent)"></i>进攻仓</span>' +
       '<span><i style="background:var(--txt-3)"></i>沪深300</span></span></div>';
     html += '<div class="card"><div class="bars">';
     years.forEach(function (y) {
@@ -1018,9 +1015,9 @@
       html += '<div class="row" data-strat="' + esc(p.name) + '">' +
         '<div class="row__main"><div class="row__name">' +
           (isSelf ? '<span style="color:var(--accent)">● </span>' : "") + esc(p.name) + '</div>' +
-        '<div class="row__meta">回撤 ' + pct(p.mdd) + ' · 卡玛 ' + num(p.calmar) + '</div></div>' +
+        '<div class="row__meta">回撤 ' + pct(p.mdd) + ' · 收益回撤比 ' + num(p.calmar) + '</div></div>' +
         '<div class="row__value"><b class="' + cls(p.cagr) + '">' + pct(p.cagr) + '</b>' +
-        '<small>年化 · 夏普 ' + num(p.sharpe) + '</small></div></div>';
+        '<small>年化 · 稳不稳 ' + num(p.sharpe) + '</small></div></div>';
     });
     html += '</div></div>';
 
@@ -1064,7 +1061,7 @@
     var eqPct = Math.round((SIG.equity_weight != null ? SIG.equity_weight : _eqSum) * 100);
     var bondPct = Math.round((SIG.bond_weight != null ? SIG.bond_weight : _bdSum) * 100);
     var cashPct = Math.max(0, 100 - eqPct - bondPct);
-    /* 闸门两档，标签也只留两态（>=0.7 满敞口，否则半敞口） */
+    /* 大盘状态只有两档（>=0.7 满仓，否则半仓），标签也只留两态 */
     var stateTxt = regime == null ? "—" : regime >= 0.7 ? "进攻" : "防守";
     var stateCls = regime >= 0.7 ? "up" : "down";
 
@@ -2025,14 +2022,14 @@
       out += '<div class="row"><div class="row__main"><div class="row__name">' + y + ' 年</div>' +
         '<div class="row__meta">沪深300 ' + (isNum(b) ? b.toFixed(1) + "%" : "—") + '</div></div>' +
         '<div class="row__value"><b class="' + cls(a) + '">' + (isNum(a) ? (a > 0 ? "+" : "") + a.toFixed(1) + "%" : "—") + '</b>' +
-        '<small>卫星腿</small></div></div>';
+        '<small>进攻仓</small></div></div>';
     });
     return out;
   }
 
   function shortCol(c) {
     return c.replace("年化收益(CAGR)", "年化").replace("_CAGR", "_年化")
-      .replace("最终模型", "卫星腿").replace("纯动量", "纯动量")
+      .replace("最终模型", "进攻仓").replace("纯动量", "纯动量")
       .replace("最大回撤", "回撤").replace("_MaxDD", "_回撤").replace("基准", "基准");
   }
   function isPctCol(c) { return /收益|回撤|MaxDD|波动|胜率|CAGR/.test(c); }
@@ -2248,7 +2245,7 @@
         if (!p) return;
         openSheet(nm,
           '<p>累计收益 <b>' + pct(p.cum, 1) + '</b>　年化 <b>' + pct(p.cagr) + '</b></p>' +
-          '<p>年化波动 ' + pct(p.vol) + '　夏普 ' + num(p.sharpe) + '　卡玛 ' + num(p.calmar) + '</p>' +
+          '<p>年化波动 ' + pct(p.vol) + '　稳不稳 ' + num(p.sharpe) + '　收益回撤比 ' + num(p.calmar) + '</p>' +
           '<p>最大回撤 ' + pct(p.mdd) + '　超额 ' + pct(p.excess, 1) + '</p>' +
           '<p>Beta ' + num(p.beta) + '　信息比率 ' + num(p.ir) + '　年均换手 ' + num(p.turnover, 1) + ' 倍</p>');
       });

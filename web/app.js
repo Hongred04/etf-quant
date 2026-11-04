@@ -1181,12 +1181,22 @@
         </div>
       </div>`;
 
-    const rows = (d.periods || []).slice().reverse().map((r) => {
+    /* 配置变了要能看出来：同一张表里，前半段可能是纯卫星、后半段是核心+卫星。
+       只在"与上一期不同"的那一行打标签，否则每行都挂一个等于没有。 */
+    const chrono = d.periods || [];
+    const cwName = (cw) => (cw == null ? null : cw > 0 ? `核心${Math.round(cw * 100)}%` : "纯卫星");
+    const marks = chrono.map((p, i) =>
+      i === 0 ? p.core_weight != null : (p.core_weight ?? null) !== (chrono[i - 1].core_weight ?? null));
+    const switches = marks.filter((v, i) => v && i > 0).length;
+
+    const rows = chrono.map((r, i) => ({ ...r, _mark: marks[i] })).reverse().map((r) => {
       const holds = (r.holdings || []).map((h) =>
         `<span class="thold"><b>${pct(h.weight, 1)}</b> ${esc(h.name)}</span>`).join("");
+      const cwTag = r._mark && cwName(r.core_weight)
+        ? ` · <span class="cw-tag">${cwName(r.core_weight)}</span>` : "";
       return `<tr>
         <td class="cell-name"><div class="nm">${esc(r.signal_date)}</div>
-          <div class="sub"><span>${r.pending ? "待执行" : "执行 " + esc(r.exec_date)}</span></div></td>
+          <div class="sub"><span>${r.pending ? "待执行" : "执行 " + esc(r.exec_date)}</span>${cwTag}</div></td>
         <td class="cell-holds">${holds}</td>
         <td class="num ${cls(r.ret)}">${r.ret == null ? '<span class="dim">待执行</span>' : `${r.ret >= 0 ? "+" : ""}${(r.ret * 100).toFixed(2)}%`}</td>
         <td class="num ${cls(r.cum)}">${r.cum == null ? "—" : `${r.cum >= 0 ? "+" : ""}${(r.cum * 100).toFixed(2)}%`}</td>
@@ -1203,7 +1213,7 @@
       <div class="card reveal">
         <div class="card-head"><div>
           <div class="card-title">${overlap ? "纸上净值" : "纸上净值 vs 同期回测"}</div>
-          <div class="card-sub">${esc(d.first)} 起 · ${d.count} 期${overlap ? " · 与回测完全重合" : ""}</div>
+          <div class="card-sub">${esc(d.first)} 起 · ${d.count} 期${overlap ? " · 与回测完全重合" : ""}${switches ? ` · 换过 ${switches} 次配置` : ""}</div>
         </div></div>
         <div class="card-body"><canvas id="trackChart"></canvas></div>
       </div>

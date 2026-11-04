@@ -207,7 +207,10 @@ def main() -> None:
             rows = archive_rows(out, panel.close, sig_date)
             for row, (_, r) in zip(rows, out.iterrows()):
                 row["exec_date"] = str(sched["exec_date"].date())
-            n = upsert_signal(archive_path(ROOT / "data"), rows, source="live")
+            # 归档里显式记下这一期用的是哪套配置：只靠"含不含核心代码"推断不出
+            # 0.3 与 0.5 的差别，而跟单记录要按配置分段。
+            n = upsert_signal(archive_path(ROOT / "data"), rows, source="live",
+                              core_weight=float(args.core_weight))
             print(f"[OK] 已归档 {n} 条信号到 data/signal_archive.csv（source=live）")
         except Exception as exc:  # noqa: BLE001 —— 归档失败不该让出信号这一步失败
             print(f"[WARN] 信号归档失败：{type(exc).__name__}: {exc}")

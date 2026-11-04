@@ -254,6 +254,18 @@ html, body {
   padding-bottom: 2px;
 }
 
+/* 逐期表里的配置标签：只在配置变化的那一行出现 */
+.cw-tag {
+  display: inline-block;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 15px;
+  color: var(--gold);
+  border: 1px solid color-mix(in srgb, var(--gold) 34%, transparent);
+  background: color-mix(in srgb, var(--gold) 8%, transparent);
+}
+
 /* 今日盈亏：状态条里的一个数据块，不是按钮，不加背景 */
 .ss-today {
   display: inline-flex;
