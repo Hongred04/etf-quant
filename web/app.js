@@ -471,10 +471,13 @@
   function todayFootHTML() {
     const t = state.today;
     if (!t || t.error || t.pct == null) return "";
-    const amt = todayAmount(t);
-    if (!amt) return "";
-    const up = amt.value >= 0;
-    return `<span class="${up ? "up" : "down"}">今日 ${up ? "+" : "−"}${fmtMoney(Math.abs(amt.value))}</span>`;
+    // 这张表的其他数字都是「按你输入的资金」算的，今日也必须同口径：
+    // 用账户真实金额（2.5 万）去配「合计投入 10 万」，两个数并排会误导。
+    const money = cashAmount();
+    if (!money) return "";
+    const amt = money * t.pct / 100;
+    const up = amt >= 0;
+    return `<span class="${up ? "up" : "down"}">今日 ${up ? "+" : "−"}${fmtMoney(Math.abs(amt))}</span>`;
   }
 
   /* 今日盈亏的金额：有真实持仓时用后端算好的账户金额（元）；
@@ -585,9 +588,10 @@
 
     /* 对照行不能自己跟自己比：纯卫星模式下 combo.active 与 satellite 是同一行，
        原来会渲染出「12.9% / 纯进攻仓 12.9%」。这时改比沪深300——这才是用户在意的参照。 */
+    const hasBench = bench.cagr != null || bench.mdd != null;
     const ref = (score.sat && Math.abs(score.sat.cagr - score.cagr) > 1e-9)
       ? { label: "纯进攻仓", cagr: score.sat.cagr, mdd: score.sat.mdd, calmar: score.sat.calmar }
-      : { label: "沪深300", cagr: bench.cagr, mdd: bench.mdd,
+      : { label: hasBench ? "沪深300" : "基准缺失", cagr: bench.cagr, mdd: bench.mdd,
           calmar: bench.calmar ?? benchCalmar };
 
     const scoreCard = `
@@ -600,13 +604,15 @@
         <div class="card-body">
           <div class="score-grid">
             <div><span>一年赚多少</span><b class="${cls(score.cagr)}">${pct(score.cagr, 1)}</b>
-              <em>${ref.label} ${pct(ref.cagr ?? 0, 1)}</em></div>
+              <em>${ref.label} ${ref.cagr == null ? "—" : pct(ref.cagr, 1)}</em></div>
             <div><span>最坏跌多少</span><b class="down">${pct(score.mdd, 1)}</b>
-              <em>${ref.label} ${pct(ref.mdd ?? 0, 1)}</em></div>
+              <em>${ref.label} ${ref.mdd == null ? "—" : pct(ref.mdd, 1)}</em></div>
             <div><span>赚得稳不稳</span><b>${num(score.calmar)}</b>
-              <em>${ref.label} ${num(ref.calmar ?? 0)}</em></div>
+              <em>${ref.label} ${ref.calmar == null ? "—" : num(ref.calmar)}</em></div>
             <div><span>最长套多久</span><b>${uw && uw.max_days ? (uw.max_days / 365.25).toFixed(1) + " 年" : "—"}</b>
-              <em>${uw && uw.max_start ? esc(uw.max_start.slice(0, 7)) + " 起" : "从最高点跌下去到回本"}</em></div>
+              <em>${uw && uw.max_start
+                ? (score.cw > 0 ? "进攻仓 " : "") + esc(uw.max_start.slice(0, 7)) + " 起"
+                : "从最高点跌下去到回本"}</em></div>
           </div>
 
         </div>
@@ -672,12 +678,14 @@
     // 图例
     const legend = $("#navLegend");
     navSeries.forEach((s) => {
-      const item = el(`<button class="legend-item"><span class="legend-swatch" style="background:${s.color}"></span>${esc(pretty(s.name))}</button>`);
+      const item = el(`<button class="legend-item" data-name="${esc(s.name)}"><span class="legend-swatch" style="background:${s.color}"></span>${esc(pretty(s.name))}</button>`);
       item.addEventListener("click", () => {
         if (state.hidden.has(s.name)) state.hidden.delete(s.name);
         else if (state.hidden.size < navSeries.length - 1) state.hidden.add(s.name);
         item.classList.toggle("is-off", state.hidden.has(s.name));
         redrawAll();
+        // 年度柱用的是同一个 state.hidden：不跟着重建，两张图会互相矛盾
+        if (state.overview) renderYearBars(state.overview);
       });
       legend.appendChild(item);
     });
@@ -697,6 +705,16 @@
 
     // 年度柱状
     renderYearBars(d);
+  }
+
+  /* 净值图与年度柱共用 state.hidden：一处的图例改了，另一处必须跟着改 */
+  function syncNavLegend() {
+    const lg = $("#navLegend");
+    if (!lg) return;
+    Array.from(lg.children).forEach((btn) => {
+      const name = btn.dataset.name;
+      if (name) btn.classList.toggle("is-off", state.hidden.has(name));
+    });
   }
 
   function renderYearBars(d) {
@@ -746,6 +764,8 @@
         if (hidden.has(n)) hidden.delete(n);
         else if (hidden.size < names.length - 1) hidden.add(n);
         renderYearBars(d);
+        syncNavLegend();
+        redrawAll();
       });
       lg.appendChild(item);
     });
@@ -1057,7 +1077,7 @@
     $("#copyOrder")?.addEventListener("click", async () => {
       const cash = parseInt(input.value.replace(/[^\d]/g, "") || "0", 10);
       let total = 0;
-      const lines = rows.map((r, i) => {
+      const lines = orderedRows.map((r, i) => {
         const w = r.share / tw;
         const lots = Math.floor((cash * w) / (r.price * 100));
         total += lots * 100 * r.price;
@@ -1743,9 +1763,11 @@
     const tbl = (data, labelMap) => {
       if (!data) return "";
       const keep = data.columns.filter((c) => Object.prototype.hasOwnProperty.call(KEEP_COLS, c));
+      // 列名对不上就整表照原样显示：subsample 表的列是「基准CAGR / 纯动量_CAGR…」，
+      // 精确匹配会让整张表只剩「做法」一列。
       const cols = [
         { key: "name", label: "做法", fmt: (v) => `<span class="strong">${esc(pretty(v))}</span>` },
-        ...keep.map((c) => ({ key: "c" + c, label: KEEP_COLS[c],
+        ...(keep.length ? keep : data.columns).map((c) => ({ key: "c" + c, label: KEEP_COLS[c] || c,
           tip: COLTIP[c], fmt: colFmt(c) })),
       ];
       const rows = data.index.map((name, ri) => {
@@ -2230,7 +2252,11 @@
   }
 
   /* ------------------------------------------------------- 路由 */
+  let navSeq = 0;
   async function loadPage(page) {
+    // 导航令牌：跟单记录冷启动要 7 秒，这期间用户可能已经点了别的页面。
+    // 没有令牌时，慢响应回来会把新页面的 DOM 冲掉，而标题/导航高亮还是新的。
+    const seq = ++navSeq;
     state.page = page;
     state.charts = [];
     state.hidden = new Set();
@@ -2246,38 +2272,41 @@
     try {
       if (page === "overview") {
         if (!state.overview) state.overview = await api("/api/overview");
+        // 状态条（今天要不要操作 / 底仓进攻占比 / 今日盈亏）全依赖 signal；
+        // 任务完成时 refreshAll 会把它清空，不重新取就会整条消失。
+        if (!state.signal) state.signal = await api("/api/signal").catch(() => null);
         if (!state.today) state.today = await api("/api/today").catch(() => null);
-        renderOverview();
+        if (seq === navSeq) renderOverview();
       } else if (page === "signal") {
         state.signal = await api("/api/signal");
         state.today = await api("/api/today").catch(() => null);
-        renderSignal();
+        if (seq === navSeq) renderSignal();
       } else if (page === "track") {
         state.track = await api("/api/track");
-        renderTrack();
+        if (seq === navSeq) renderTrack();
       } else if (page === "myholdings") {
         state.myholdings = await api("/api/holdings");
-        renderMyHoldings();
+        if (seq === navSeq) renderMyHoldings();
       } else if (page === "portfolio") {
         state.portfolio = await api("/api/portfolio");
-        renderPortfolio();
+        if (seq === navSeq) renderPortfolio();
       } else if (page === "research") {
         if (!state.research) state.research = await api("/api/research");
         // 顶部要引用组合口径的年化/回撤，直接输 #research 进来时 overview 还没加载
         if (!state.overview) state.overview = await api("/api/overview");
-        renderResearch();
+        if (seq === navSeq) renderResearch();
       } else if (page === "data") {
         state.universe = await api("/api/universe");
         try { state.mobile = await api("/api/mobile/info"); } catch (e) { state.mobile = null; }
-        renderData();
+        if (seq === navSeq) renderData();
       } else {
         // 旧书签（例如已删除的 #strategy）不该留白屏：回退到总览并改写 hash。
         location.replace("#overview");
         return;
       }
-      guardFrozen();
+      if (seq === navSeq) guardFrozen();
     } catch (e) {
-      view.innerHTML = `<div class="empty">加载失败：${esc(e.message)}</div>`;
+      if (seq === navSeq) view.innerHTML = `<div class="empty">加载失败：${esc(e.message)}</div>`;
     }
   }
 
@@ -2323,6 +2352,7 @@
     state.research = null;
     state.universe = null;
     state.portfolio = null;
+    state.today = null;      // 任务跑了几分钟，今日盈亏必须重取
     await loadPage(state.page);
     updateFoot();
     updateBadge();
@@ -2484,6 +2514,9 @@
     paintFootStatus(st);
     // 首屏是"状态未知"渲染出来的，回测持仓页顶部那行说明要按真实状态补一次
     if (first && state.page === "portfolio" && state.portfolio) renderPortfolio();
+    // 便携版守卫也依赖 state.status：首屏时它还是 null，这里必须补跑一次，
+    // 否则 exe 版首页的"更新行情"按钮可点，点下去必然失败。
+    if (first) guardFrozen();
     if (auto && st.stale && !st.running && !st.auto_attempted) {
       await startTask("refresh", false);
     }
@@ -3003,9 +3036,13 @@
 
   $("#btnReport").addEventListener("click", () => window.open("/report", "_blank"));
 
-  $("#btnBacktest").addEventListener("click", (e) => {
-    e.currentTarget.disabled = true;
-    runAction("backtest_combo", null);
+  $("#btnBacktest").addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    await runAction("backtest_combo", null);
+    // 启动失败（409 锁被占 / 便携版 / 网络断）不会有任务可轮询，
+    // 不恢复的话按钮会一直灰着，只能刷新页面。
+    if (!state.task) btn.disabled = false;
   });
 
   /* ------------------------------------------------------- 启动 */
@@ -3064,6 +3101,13 @@
           stale: hits,
           // 清单页的"资金买不齐"分支：低资金用例靠这个断言，见 scripts/ui_smoke.py
           fitNote: !!document.querySelector(".lot-fit-row"),
+          // 实验三那张表的列数。裁列逻辑曾把它从 9 列裁成 1 列（列名精确匹配失败），
+          // 而"只剩一列"仍是非空渲染，其他检查发现不了。
+          subsampleCols: (() => {
+            const t = Array.from(document.querySelectorAll("table"))
+              .find((x) => x.textContent.includes("基准CAGR"));
+            return t ? t.querySelectorAll("thead th").length : 0;
+          })(),
           kline: !!(modal && !modal.hidden),
           errs: (window.__errs || []).slice(0, 6),
         });

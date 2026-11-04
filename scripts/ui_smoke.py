@@ -168,6 +168,9 @@ def check(case, probe: dict | None, expect_kline: bool) -> list[str]:
     if bool(probe.get("kline")) != expect_kline:
         bad.append(f"{name}: K 线弹窗状态异常（期望 {expect_kline}）")
     # 低资金用例专有断言：3 万买不齐清单时必须给出可执行建议
+    # 实验三的表必须是完整列（裁列逻辑曾把它裁成只剩"做法"一列）
+    if name.startswith("research") and int(probe.get("subsampleCols") or 0) < 5:
+        bad.append(f"{name}: 子样本表只剩 {probe.get('subsampleCols')} 列（应 ≥5），裁列逻辑吃掉了指标列")
     # 已删页面的旧书签必须落到总览，而不是停在空白页
     if name.startswith("legacy-hash") and probe.get("page") != "overview":
         bad.append(f"{name}: 旧 hash 未回退到总览（当前 {probe.get('page')}）")

@@ -217,6 +217,18 @@ def _load_task_from_disk(tid: str) -> dict | None:
     meta["restored"] = True
     return meta
 
+def _allowed_core_weights() -> list[float]:
+    """combo.json 里实际回测过的 core_weight 档位。读不到就退回默认两档。"""
+    fp = OUT / "combo.json"
+    try:
+        data = json.loads(fp.read_text(encoding="utf-8"))
+        ws = {round(float(r.get("core_weight", 0)), 4) for r in (data.get("configs") or [])}
+        out = sorted(w for w in ws if 0.0 <= w <= 1.0)
+        return out or [0.0, 0.5]
+    except (OSError, ValueError, TypeError):
+        return [0.0, 0.5]
+
+
 def _parse_core_weight(payload: dict) -> tuple[float | None, str | None]:
     """从请求里取可选的 core_weight，返回 (值, 错误信息)。
 
@@ -233,6 +245,12 @@ def _parse_core_weight(payload: dict) -> tuple[float | None, str | None]:
         return None, f"core_weight 不是数字：{cw!r}"
     if not (0.0 <= val <= 1.0):
         return None, "core_weight 应在 0~1 之间"
+    # 只接受组合报告真正回测过的档位：接受 0.3 会生成 0.3 的清单，而 combo.json
+    # 里没有这一档，总览会静默显示"最接近的一档"（0.5）的成绩——数字对不上清单。
+    allowed = _allowed_core_weights()
+    if not any(abs(val - w) < 1e-6 for w in allowed):
+        return None, ("core_weight 只能是 " + " / ".join(f"{w:g}" for w in allowed)
+                      + "（组合报告只回测了这些档位）")
     return val, None
 
 

@@ -102,6 +102,17 @@ def test_core_weight_override_is_validated():
         val, err = S._parse_core_weight({"core_weight": bad})
         assert val is None and err and why in err, f"{bad!r} 应被拒绝：{val} {err}"
 
+    # 组合报告没回测过的档位必须拒绝：接受 0.35 会生成 0.35 的清单，
+    # 而 combo.json 只有 0/0.3/0.4/0.5/0.6/0.7/1.0，总览会静默显示"最接近的一档"。
+    allowed = S._allowed_core_weights()
+    assert allowed, "combo.json 应当至少有一档"
+    for w in allowed:
+        assert S._parse_core_weight({"core_weight": w}) == (float(w), None), f"{w} 应被接受"
+    odd = next((x for x in (0.123, 0.37, 0.88) if all(abs(x - w) > 1e-6 for w in allowed)), None)
+    if odd is not None:
+        val, err = S._parse_core_weight({"core_weight": odd})
+        assert val is None and err and "只回测了" in err, f"{odd} 应被拒绝：{val} {err}"
+
 
 def test_signal_payload_exposes_current_mode():
     """前端靠 signal.core_weight 高亮开关，缺字段会让按钮永远显示默认态。"""
