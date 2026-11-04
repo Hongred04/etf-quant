@@ -48,7 +48,6 @@
     track: { title: "跟单记录", sub: "每期信号都记着，按它买会怎样" },
     myholdings: { title: "我的持仓", sub: "" },
     portfolio: { title: "模拟账户", sub: "一路按信号买下来，账户会变成什么样" },
-    strategy: { title: "为什么这样买", sub: "" },
     research: { title: "靠不靠谱", sub: "" },
     data: { title: "数据", sub: "" },
   };
@@ -539,27 +538,32 @@
         sat: null, cw: 0, roll: null, start: m.start, mode: "纯进攻仓",
       };
 
+    /* 对照行不能自己跟自己比：纯卫星模式下 combo.active 与 satellite 是同一行，
+       原来会渲染出「12.9% / 纯进攻仓 12.9%」。这时改比沪深300——这才是用户在意的参照。 */
+    const ref = (score.sat && Math.abs(score.sat.cagr - score.cagr) > 1e-9)
+      ? { label: "纯进攻仓", cagr: score.sat.cagr, mdd: score.sat.mdd, calmar: score.sat.calmar }
+      : { label: "沪深300", cagr: bench.cagr, mdd: bench.mdd,
+          calmar: bench.calmar ?? benchCalmar };
+
     const scoreCard = `
       <div class="card reveal score-card">
         <div class="card-head">
-          <div><div class="card-title">你的钱大概会这样</div>
+          <div><div class="card-title">成绩</div>
             <div class="card-sub">回测 ${esc((score.start || "").slice(0, 7))} 起 · 已扣交易成本</div>
           </div>
         </div>
         <div class="card-body">
           <div class="score-grid">
             <div><span>一年赚多少</span><b class="${cls(score.cagr)}">${pct(score.cagr, 1)}</b>
-              <em>${score.sat ? "纯进攻仓 " + pct(score.sat.cagr, 1) : "沪深300 " + pct(bench.cagr ?? 0, 1)}</em></div>
+              <em>${ref.label} ${pct(ref.cagr ?? 0, 1)}</em></div>
             <div><span>最坏跌多少</span><b class="down">${pct(score.mdd, 1)}</b>
-              <em>${score.sat ? "纯进攻仓 " + pct(score.sat.mdd, 1) : "沪深300 " + pct(bench.mdd ?? 0, 1)}</em></div>
+              <em>${ref.label} ${pct(ref.mdd ?? 0, 1)}</em></div>
             <div><span>赚得稳不稳</span><b>${num(score.calmar)}</b>
-              <em>${score.sat ? "纯进攻仓 " + num(score.sat.calmar) : "越高越稳"}</em></div>
+              <em>${ref.label} ${num(ref.calmar ?? 0)}</em></div>
             <div><span>最长套多久</span><b>${uw && uw.max_days ? (uw.max_days / 365.25).toFixed(1) + " 年" : "—"}</b>
               <em>${uw && uw.max_start ? esc(uw.max_start.slice(0, 7)) + " 起" : "从最高点跌下去到回本"}</em></div>
           </div>
-          ${score.sat ? `<div class="score-note">这就是多一半底仓换来的差别：年化少
-            ${pct(Math.abs(score.sat.cagr - score.cagr), 1)}，最坏跌幅少
-            ${pct(Math.abs(score.sat.mdd - score.mdd), 1)}。</div>` : ""}
+
         </div>
       </div>`;
 
@@ -569,8 +573,8 @@
       <div class="card reveal">
         <div class="card-head">
           <div>
-            <div class="card-title">进攻仓净值曲线</div>
-            <div class="card-sub" title="；成本按每次单边 0.10% 扣；只画进攻仓那部分资金">${m.start} — ${m.end} · 只画进攻仓</div>
+            <div class="card-title">${score.cw > 0 ? "进攻仓净值曲线" : "净值曲线"}</div>
+            <div class="card-sub" title="成本按每次单边 0.10% 扣">${m.start} — ${m.end}${score.cw > 0 ? " · 只画进攻仓" : ""}</div>
           </div>
           <div class="legend" id="navLegend"></div>
         </div>
@@ -581,7 +585,7 @@
         <div class="card reveal">
           <div class="card-head">
             <div><div class="card-title">进攻仓回撤曲线</div>
-            <div class="card-sub">红色进攻仓 · 虚线沪深300${uwMax ? " · " + uwMax : ""}</div></div>
+            <div class="card-sub">${uwMax || ""}</div></div>
             ${ddNow == null ? "" : `<div class="dd-now">
               <b>${pct(ddNow, 1)}</b><span>当前回撤</span>
               ${uwNow ? `<em>${uwNow}</em>` : ""}</div>`}
@@ -592,7 +596,7 @@
         <div class="card reveal">
           <div class="card-head">
             <div><div class="card-title">年度收益</div>
-            <div class="card-sub">柱上为该年进攻仓收益</div></div>
+            </div>
             <div class="legend" id="yearLegend"></div>
           </div>
           <div class="card-body"><div class="bars" id="yearBars"></div></div>
@@ -868,8 +872,7 @@
       <!-- 「执行规则」卡原来另起一块，把"今天要不要动"又说了一遍——
            顶上状态条已经回答过，这里删掉，只把独一无二的两条并进脚注。 -->
       <div class="muted-line">
-        参考价取 ${esc(d.date)} 收盘，每次调仓成本约 ${pct(d.per_reb_cost, 2)}。
-        跨境 ETF 常有 1%~3% 溢价，溢价高时改用场外联接或这期跳过。不构成投资建议。
+        参考价 ${esc(d.date)} 收盘 · 调仓成本 ${pct(d.per_reb_cost, 2)}
       </div>
     `;
 
@@ -886,9 +889,9 @@
        只在大盘状态降档时出现。原来的表按占比混排，8 行里哪几行要动手要看徽章猜。 */
     const legOf = (r) => (r.leg === "core" ? "core" : r.category === "债券" ? "bond" : "sat");
     const GROUPS = [
-      { key: "core", title: "底仓 · 打底，不用常动", sub: "每期只做等权重置，偏离很小" },
-      { key: "sat", title: "进攻仓 · 每期可能换", sub: "动量信号说了算，是真正要盯的几行" },
-      { key: "bond", title: "防守债券", sub: "大盘走弱时进攻仓的另一半资金" },
+      { key: "core", title: "底仓", sub: "" },
+      { key: "sat", title: "进攻仓", sub: "" },
+      { key: "bond", title: "债券", sub: "" },
     ];
     const GROUP_OF = Object.fromEntries(GROUPS.map((g) => [g.key, g]));
     const orderedRows = GROUPS.flatMap((g) => rows.filter((r) => legOf(r) === g.key));
@@ -925,7 +928,7 @@
         // 组头：换了组就插一行说明，让"哪几行不用动"在表格里一眼可辨
         const g = GROUP_OF[legOf(r)];
         const head = g !== lastGroup
-          ? `<tr class="group-head"><td colspan="8"><b>${esc(g.title)}</b><span class="dim"> · ${esc(g.sub)}</span></td></tr>`
+          ? `<tr class="group-head"><td colspan="8"><b>${esc(g.title)}</b>${g.sub ? `<span class="dim"> · ${esc(g.sub)}</span>` : ""}</td></tr>`
           : "";
         lastGroup = g;
         idx += 1;
@@ -988,9 +991,7 @@
       } else if (cash > 0 && left > 0.5) {
         const gapPct = (left / cash) * 100;
         $("#orderFoot").innerHTML += `<tr><td colspan="8" class="lot-gap-row">
-          整手取整后有 <b>${fmtMoney(left)}</b>（${gapPct.toFixed(1)}%）留在现金，买不进去。
-          回测按分数份额计算、没有这个缺口；资金越小、标的越贵，偏差越大。
-          建议按「实付」列下单，不要凑整。</td></tr>`;
+          整手取整后剩 <b>${fmtMoney(left)}</b>（${gapPct.toFixed(1)}%）现金。按「实付」列下单，不要凑整。</td></tr>`;
       }
     }
 
@@ -1051,7 +1052,7 @@
     if (!d.count) {
       view.innerHTML = `<div class="card reveal"><div class="card-head"><div>
         <div class="card-title">还没有归档信号</div>
-        <div class="card-sub">每次生成信号都会归档</div>
+        
       </div></div><div class="card-body">
         <ol class="steps">
           <li>到「数据与维护」运行一次「生成选股信号」，当期就会留下一条 live 记录；</li>
@@ -1086,8 +1087,8 @@
     const fwdCard = `
       <div class="card reveal">
         <div class="card-head"><div>
-          <div class="card-title">前向验证 · live 信号保真度</div>
-          <div class="card-sub">live 归档与回测同日目标逐期对照；不一致时，纸上净值测的就不是这套策略</div>
+          <div class="card-title">归档与回测是否一致</div>
+          <div class="card-sub">归档 vs 回测同日目标</div>
         </div><span class="src-tag live">${fwd.live_periods} 期</span></div>
         <div class="card-body">
           <div class="fwd-stats">
@@ -1109,7 +1110,7 @@
             </tr>`).join("")}</tbody>
           </table></div>` : '<div class="empty">还没有 live 归档，运行一次「生成选股信号」后开始记录。</div>'}
           ${(fwd.live_executed ?? 0) < (fwd.need || 8)
-            ? `<div class="note mt">已执行 <b>${fwd.live_executed ?? 0}</b> 期，还差 <b>${(fwd.need || 8) - (fwd.live_executed ?? 0)}</b> 期才到 ${fwd.need || 8} 期门槛。在此之前，跑赢或跑输都不构成证据——这是「小样本当规律」的典型陷阱。</div>`
+            ? `<div class="note mt">已执行 <b>${fwd.live_executed ?? 0}</b> 期，还差 <b>${(fwd.need || 8) - (fwd.live_executed ?? 0)}</b> 期到 ${fwd.need || 8} 期门槛。</div>`
             : ""}
         </div>
       </div>`;
@@ -1143,7 +1144,7 @@
       <div class="card reveal">
         <div class="card-head"><div>
           <div class="card-title">逐期信号</div>
-          <div class="card-sub"></div>
+          
         </div></div>
         <div class="table-wrap"><table class="track-table">
           <thead><tr><th style="text-align:left">信号日</th><th style="text-align:left">目标持仓</th>
@@ -1191,7 +1192,7 @@
     return `<div class="card reveal" id="holdFormCard">
       <div class="card-head"><div>
         <div class="card-title" id="holdFormTitle">添加一笔持仓</div>
-        <div class="card-sub">照券商 App 抄；成本价填<b>摊薄成本</b>（含手续费）</div>
+        <div class="card-sub">填<b>摊薄成本</b></div>
       </div><button class="btn btn-ghost btn-sm" id="holdCancel" hidden>取消编辑</button></div>
       <div class="card-body">
         <form class="hold-form" id="holdForm" autocomplete="off">
@@ -1243,7 +1244,7 @@
       html += `<div class="card reveal build-notes">
         <div class="card-head"><div>
           <div class="card-title">整手约束提示</div>
-          <div class="card-sub">回测按分数份额成交；实盘按 100 份一手买入，两者会有缺口</div>
+          
         </div></div>
         <div class="card-body">
           ${miss.length ? `<div class="bn-head">未买入 ${miss.length} 只 — 一手金额已超过该只预算，整只没买上</div>` : ""}
@@ -1281,7 +1282,7 @@
       html += `<div class="card reveal">
         <div class="card-head"><div>
           <div class="card-title">还没有持仓</div>
-          <div class="card-sub">按今日信号建仓，或自己录入；数据只存在这台电脑上</div>
+          <div class="card-sub">数据只存在本机</div>
         </div></div>
         <div class="card-body">
           <div class="quick-build">
@@ -1588,9 +1589,7 @@
 
     view.innerHTML = `
       <div class="dateline">${dateLine}</div>
-      <div class="note"><div><b>这是进攻仓单独的模拟账户</b>，不含 50% 红利低波底仓。
-        下面 4 个持仓与「调仓清单」不一致是正常的：清单是<b>今日信号</b>（含底仓），
-        这里是<b>回测最后一天</b>的进攻仓。你实际拿到的是「一半底仓 + 这里的一半」。</div></div>
+      <div class="muted-line" style="margin-top:0"><b>只含进攻仓</b>，不含底仓；清单是今日信号，这里是回测最后一天。</div>
       <div class="kpi-grid">
         ${kpiCard("当前持仓", d.current.length, `平均 ${s.avg_holdings} 只`
           + (state.status && state.status.stale ? `（数据落后 ${state.status.behind_sessions} 天）`
@@ -1645,214 +1644,6 @@
     `;
   }
 
-  /* ------------------------------------------------------- 页面：策略 */
-  function renderStrategy() {
-    // 组合口径的数字全部来自 /api/overview 的 combo 段（output/combo.json 现算），
-    // 不在前端写死。原来这里写着"年化 12.0%、回撤 −19.4%、78 个窗口 88% 更优"，
-    // 只要 core_weight、数据区间或回测记账方式一变，页面就开始说假话。
-    const cb = state.overview && state.overview.combo;
-    const cw = (cb && cb.core_weight != null) ? cb.core_weight : 0.5;
-    const CORE_CODES = (cb && cb.core_codes && cb.core_codes.length)
-      ? cb.core_codes.map((c) => String(c).replace(/^(sh|sz)/, ""))
-      : ["512890", "515450", "515300", "159307"];
-    const sat = cb && cb.satellite, act = cb && cb.active, roll = cb && cb.rolling;
-    const comboEffect = (act && sat)
-      ? `效果：年化 ${pct(act.cagr, 1)}、最大回撤 ${pct(act.mdd, 1)}`
-        + `（纯卫星是 ${pct(sat.cagr, 1)} / ${pct(sat.mdd, 1)}）`
-        + (roll ? `\n       ${roll.windows} 个滚动 12 个月窗口里，组合收益回撤比有 ${pct(roll.share, 0)} 优于纯卫星` : "")
-      : "效果：缺少 output/combo.json，请先跑一次 scripts/combo_report.py";
-    const corrTxt = (cb && cb.corr != null) ? cb.corr.toFixed(2) : "—";
-
-    // 实验结论（brief）在下面的层说明里也要引用，必须在 layers 之前取到。
-    const b = (state.research && state.research.brief) || null;
-    const layers = [
-      {
-        t: `先分两笔钱：底仓 ${pct(cw, 0)} + 进攻 ${pct(1 - cw, 0)}`,
-        d: "这是 2026-11 起的默认配置。原因是纯动量策略的最大回撤是 −35%，"
-          + "而所有止损、熔断、降仓位的办法都只能「用收益换波动」——"
-          + "降到同样的回撤，年化要掉到个位数。真正有效的是加一笔走势不同步的钱："
-          + "红利低波与动量腿的日收益相关性只有 " + corrTxt + "。",
-        c: [
-          `核心 ${pct(cw, 0)} → 4 只红利低波 ETF 等权（${CORE_CODES.join(" / ")}）`,
-          "              不择时、每期等权重置，与进攻仓低相关",
-          `进攻 ${pct(1 - cw, 0)} → 下面第一到第五步的动量轮动`,
-          "",
-          comboEffect,
-        ].join("\n"),
-      },
-      {
-        t: "进攻 · 第一步：判断大盘强弱，决定用几成仓位",
-        d: "先看沪深300 站在均线上方还是下方。三项条件各得一点分，加起来 0~1 分：分高说明趋势好，可以重仓；分低说明在下跌，把权益减到一半，其余买债券。",
-        c: "大盘分 = 0.4 × (站上200日线?) + 0.3 × (站上60日线?) + 0.3 × (近20日上涨?)\n\n分数 ≥ 0.7 → 权益 100%\n分数 < 0.7 → 权益 50%（其余买债券，账户仍满仓、不空仓）",
-      },
-      {
-        t: "进攻 · 第二步：剔除不合格的 ETF，只留下能买的",
-        d: "四条硬性门槛，分别过滤掉：刚上市没历史数据的、成交太冷清买不进卖不出的、还在下跌趋势里的、以及短期被爆炒过热的。",
-        c: "① 上市满 250 个交易日        → 保证 200 日均线算得出来\n② 近 20 日日均成交额 ≥ 2000 万 → 保证买得进、卖得掉\n③ 收盘价在 60 日均线上方      → 只买上升趋势，不抄底\n④ 量比(5日/60日成交量) < 3    → 剔除成交突然放大的拥挤品种",
-      },
-      {
-        t: "进攻 · 第三步：给剩下的打分，看谁最强",
-        d: "只用一个指标排序：近 20 个交易日的涨幅。但故意去掉最近 5 个交易日，因为短期急涨往往随后回吐，去掉后更能反映真实强度。",
-        c: "按「近20日涨幅（剔除最近5日）」从高到低排序\n\n"
-          + "说明：加入中期动量、低波动等因子反而更差（"
-          + ((b && b.multi) ? `${pct(b.multi.multi_cagr, 1)} vs 纯动量 ${pct(b.multi.pure_cagr, 1)}` : "见「效果验证」")
-          + "），\n      因为 A 股行业轮动周期只有 3~8 周，慢因子会错过行情。",
-      },
-      {
-        t: "进攻 · 第四步：买前 3 名，每只等额",
-        d: "取分数最高的 3 只，资金平均分配，单只最多不超过 45%，避免押注过度集中。",
-        c: "取前 3 名 · 每只 1/3 仓位 · 单只上限 45%",
-      },
-      {
-        t: "进攻 · 第五步：少折腾，控住回撤",
-        d: "频繁换手会被成本吃掉收益，所以给已有持仓一个「缓冲」：只要还排在前 6 名就继续拿着，不必因为掉出前 3 就立刻卖出。",
-        c: "缓冲规则：持仓仍在前6名 → 继续持有（不必卖出）\n调仓频率：每 5 个交易日一次，次日开盘执行\n回撤熔断：已关闭（实验证明它在底部减仓，反而越抄越跌）",
-      },
-    ];
-
-    const conditions = [
-      ["底仓", `4 只红利低波 ETF 等权，不择时`, `与进攻仓相关性 ${corrTxt}`],
-      ["底仓调仓", "每个调仓日等权重置", "偏离很小，换手近零"],
-      ["进攻仓权重", `占 ${pct(1 - cw, 0)}（可调 0~100%）`, "决定回撤与收益的取舍"],
-      ["标的范围", "沪深 ETF，剔除货币，同指数只留成交额最大者", "避免同质重复暴露"],
-      ["上市时长", "≥ 250 个交易日", "因子可算，规避次新炒作"],
-      ["流动性", "20 日均成交额 ≥ 2000 万元", "容纳实盘冲击成本"],
-      ["趋势", "收盘价 > MA60", "只做多头趋势，不抄底"],
-      ["拥挤度", "量比(5/60) < 3.0", "规避情绪过热后的反转"],
-      ["排序", "R20（剔除最近 5 日）降序", "核心 alpha 来源"],
-      ["持仓数", "Top 3，等权，单只 ≤ 45%", "集中度与分散度的平衡"],
-      ["总仓位", "由 regime 决定 100% / 50%", "控制系统性风险"],
-      ["防守", "剩余仓位配 R20 最强债券 ETF", "提升组合夏普"],
-      ["调仓", "每 5 交易日，T+1 开盘执行", "匹配轮动周期，规避前视"],
-    ];
-
-    const refuted = refutedItems(b);
-    const sens = rebSensitivity(b);
-
-    view.innerHTML = `
-      <div class="card reveal">
-        <div class="card-head">
-          <div>
-            <div class="card-title">底仓打底，进攻仓轮动</div>
-            <div class="card-sub">下面的比例与效果数字来自当前配置的回测，不是写死的</div>
-          </div>
-        </div>
-        <div class="card-body">
-          <div class="layers">
-            ${layers.map((l, i) => `<div class="layer">
-              <div class="layer-idx">${i + 1}</div>
-              <div>
-                <div class="layer-title">${esc(l.t)}</div>
-                <div class="layer-desc">${esc(l.d)}</div>
-                <details class="rule-details">
-                  <summary>具体怎么算</summary>
-                  <div class="layer-code">${esc(l.c)}</div>
-                </details>
-              </div>
-            </div>`).join("")}
-          </div>
-        </div>
-      </div>
-
-      <details class="card reveal mt more-card">
-        <summary>所有门槛一张表（要看细节再点开）</summary>
-        ${tableCard("完整清单：买什么、怎么买", "左边是约束，右边是原因",
-          [
-            { key: "k", label: "条件", fmt: (v) => `<span class="strong">${esc(v)}</span>` },
-            { key: "v", label: "规则", fmt: (v) => `<span class="dim">${esc(v)}</span>` },
-            { key: "w", label: "为什么", fmt: (v) => esc(v) },
-          ],
-          conditions.map(([k, v, w]) => ({ k, v, w }))) }
-      </details>
-
-      <div class="grid-2 mt">
-        <div class="card reveal">
-          <div class="card-head"><div>
-            <div class="card-title">已被证伪的设计</div>
-            <div class="card-sub">经消融验证为负贡献，未启用${b ? " · 数字现算" : ""}</div>
-          </div></div>
-          <div class="card-body" style="padding-top:4px">
-            ${refuted || '<div class="empty">缺少实验数据，先跑 scripts/ablation.py</div>'}
-          </div>
-        </div>
-
-        <div class="card reveal">
-          <div class="card-head"><div>
-            <div class="card-title">参数敏感性</div>
-            <div class="card-sub">调仓频率是进攻仓最脆弱的参数</div>
-          </div></div>
-          <div class="card-body" style="padding-top:0">
-            ${sens.map(([k, v, w]) => `
-              <div style="padding:9px 0;border-bottom:1px solid var(--line-2)">
-                <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:6px">
-                  <span>${esc(k)}</span>
-                  <span class="num ${v > 0 ? "up" : "down"}">${pct(v, 1)}</span>
-                </div>
-                <div class="wbar"><i style="width:${w}%;background:${v > 0 ? "linear-gradient(90deg,#6d8cff,#35d7e8)" : "#2ebd85"}"></i></div>
-              </div>`).join("")}
-            <div class="note mt" style="margin-top:14px">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M12 8.5v5M12 16.6v.1" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/></svg>
-              <div>调仓延迟一倍的代价是年化近乎腰斩。实盘执行纪律比参数微调更重要。</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
-  /**
-   * 「已被证伪的设计」。原来这一栏是写死的三条（熔断、四因子、1/σ 与 Top5），
-   * 其中「1/σ 加权更差」在修复隔夜跳空记账之后**已经不成立**——
-   * 新数据里 1/σ 反而比等权高 2pp。所以改成按实验表判断：
-   * 只有确实比完整模型差的才列进来，正贡献的不许硬说成负贡献。
-   */
-  function refutedItems(b) {
-    if (!b || !b.ablation) return "";
-    const full = b.ablation.full;
-    if (!full) return "";
-    const card = (title, desc) => `<div class="layer" style="margin-bottom:8px">
-      <div class="layer-idx" style="color:var(--up);background:rgba(246,70,93,.12)">✕</div>
-      <div><div class="layer-title">${esc(title)}</div>
-      <div class="layer-desc">${desc}</div></div>
-    </div>`;
-    const out = [];
-    const dd = b.ablation.dd_brake;
-    if (dd && dd.cagr < full.cagr) {
-      out.push(card("组合级回撤熔断",
-        `净值自高点回撤 10% 时减半仓。实际在下跌末期减仓形成<b>追跌</b>：`
-        + `年化 ${pct(full.cagr, 1)} → ${pct(dd.cagr, 1)}（${((dd.cagr - full.cagr) * 100).toFixed(1)}pp），`
-        + `回撤 ${pct(full.mdd, 1)} → ${pct(dd.mdd, 1)}，两头都更差。`));
-    }
-    if (b.multi && b.multi.multi_cagr < b.multi.pure_cagr) {
-      out.push(card("四因子合成打分",
-        `R20 + R60 + Sharpe60 + 低波动。A 股 ETF 轮动周期仅 3—8 周，`
-        + `中期动量与低波动因子会<b>系统性低配刚启动的品种</b>：`
-        + `${pct(b.multi.multi_cagr, 1)} vs 纯动量 ${pct(b.multi.pure_cagr, 1)}。`));
-    }
-    if (b.top5 && b.top5.top5_cagr < b.top5.final_cagr) {
-      out.push(card("Top5 分散",
-        `持仓从 3 只扩到 5 只后年化 ${pct(b.top5.top5_cagr, 1)}（默认 ${pct(b.top5.final_cagr, 1)}）。`
-        + `过度分散削弱了动量的选股效率——最强的那只被稀释了。`));
-    }
-    // 实测为**正**贡献的方案不列在这里（1/σ 加权就是这种情况），
-    // 但也不静默丢掉：它没进默认配置的原因在「效果验证」里说明。
-    return out.join("");
-  }
-
-  /** 调仓频率敏感性。原来写死 23.9 / 9.2 / −0.8，改为从消融表取。 */
-  function rebSensitivity(b, C = "年化收益(CAGR)") {
-    const a = (b && b.ablation) || null;
-    if (!a || !a.full) return [];
-    const full = a.full.cagr;
-    const rows = [
-      ["5 日（默认）", full],
-      ["10 日", a.reb10 ? a.reb10.cagr : null],
-      ["20 日", a.reb20 ? a.reb20.cagr : null],
-    ].filter(([, v]) => v != null);
-    const hi = Math.max(...rows.map(([, v]) => Math.abs(v)), 0.01);
-    return rows.map(([k, v]) => [k, v, Math.max(4, (Math.abs(v) / hi) * 100)]);
-  }
-
   /* ------------------------------------------------------- 页面：实验 */
   function renderResearch() {
     const d = state.research;
@@ -1864,9 +1655,6 @@
     // 「组合口径是 12.0% / −19.4%」这句原来写死在说明里。组合比例一调、
     // 或回测记账口径一改，它就变成假话。改成从 overview 的 combo 段取。
     const _cb = state.overview && state.overview.combo;
-    const comboTip = (_cb && _cb.active)
-      ? `（${pct(_cb.active.cagr, 1)} / ${pct(_cb.active.mdd, 1)}）`
-      : "";
 
     const colFmt = (c) => {
       if (/持续/.test(c)) return (v) => ({ text: v == null ? "—" : v.toFixed(0) });
@@ -1924,12 +1712,6 @@
     };
 
     view.innerHTML = `
-      <div class="muted-line" style="margin-top:0;margin-bottom:14px">
-        这一页只回答一个问题：<b>现在这套做法，有多少是「事后挑出来的」</b>。
-        统计都只算进攻仓那部分（占一半资金）；底仓是固定几只红利低波，没有可调参数。
-        你实际拿到的组合结果见「总览」${comboTip}。
-      </div>
-
       ${d.overfit ? (() => {
         const o = d.overfit;
         const decay = o.is_sharpe_median ? (o.oos_sharpe_median / o.is_sharpe_median - 1) : null;
@@ -1943,7 +1725,7 @@
         return `<div class="card reveal mt">
           <div class="card-head"><div>
             <div class="card-title">实验四 · 这些结果里有多少是「挑」出来的？</div>
-            <div class="card-sub">${o.n_variants} 个变体 · ${o.n_days} 个交易日 · 复现 scripts/overfit_check.py</div>
+            <div class="card-sub">${o.n_variants} 个变体 · ${o.n_days} 个交易日</div>
           </div></div>
           <div class="card-body">
             <div class="kpi-grid">
@@ -1978,9 +1760,8 @@
               <tbody>${walk}</tbody>
             </table></div>` : ""}
             <div class="card-sub" style="margin-top:10px">
-              结论：过拟合主要发生在「<b>挑参数</b>」而不是「策略结构」——${o.n_variants} 个变体全部跑赢基准，
-              但滚动重挑比固定默认差 ${pct(o.wf_fixed_cagr - o.wf_cagr, 1)}/年，且每次选中的变体都不一样。
-              默认参数在网格里并列第 ${o.default_rank}，并非历史上最漂亮。
+              ${o.n_variants} 个变体全部跑赢基准；滚动重挑比固定默认差
+              ${pct(o.wf_fixed_cagr - o.wf_cagr, 1)}/年；默认参数在网格里并列第 ${o.default_rank}。
             </div>
           </div>
         </div>`;
@@ -1989,7 +1770,7 @@
       <div class="mt">
         ${tbl(d.ladder, {
           title: "实验一 · 每加一个模块，效果是变好还是变差？",
-          sub: "从最朴素的「只按 20 日涨幅排序、满仓、不加任何过滤」开始，每次只增加一个功能，看年化收益和回撤怎么变",
+          sub: "从只看 20 日涨幅开始，每次加一个功能",
           hl: "闸门改为仅降半仓",
         })}
       </div>
@@ -1997,7 +1778,7 @@
       <div class="mt">
         ${tbl(d.ablation, {
           title: "实验二 · 反过来：每拿掉一个模块，会损失多少？",
-          sub: "从功能全开的复杂模型出发，每次关掉一个功能，对比谁在拖后腿",
+          sub: "从功能全开开始，每次关掉一个",
         })}
       </div>
 
@@ -2012,7 +1793,7 @@
         <div class="card reveal">
           <div class="card-head"><div>
             <div class="card-title">与直觉相反的结论</div>
-            <div class="card-sub">全部从上面三张表现算，不另写数字</div>
+            
           </div></div>
           <div class="card-body">
             <ol style="margin:0;padding-left:20px;font-size:12.5px;line-height:1.9;color:var(--txt-2)">
@@ -2023,7 +1804,7 @@
         <div class="card reveal">
           <div class="card-head"><div>
             <div class="card-title">超额收益的时间分布</div>
-            <div class="card-sub">相邻两段超额之差就是「这一段值不值得等」</div>
+            
           </div></div>
           <div class="card-body">
             <div style="font-size:12.5px;line-height:2;color:var(--txt-2)">
@@ -2124,7 +1905,7 @@
       <div class="card reveal mt">
         <div class="card-head"><div>
           <div class="card-title">手机 App</div>
-          <div class="card-sub">内置历史，离线自算</div>
+          
         </div></div>
         <div class="card-body">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -2153,7 +1934,7 @@
         <div class="card reveal">
           <div class="card-head"><div>
             <div class="card-title">各类资产有多少可选</div>
-            <div class="card-sub">括号内为今日成交额（亿元）</div>
+            <div class="card-sub"></div>
           </div></div>
           <div class="card-body" style="padding-top:2px">
             ${d.categories.map((c) => `
@@ -2180,7 +1961,7 @@
               ["download", "更新历史行情", "259 只 × 8.8 年前复权日线，约 70 秒"],
               ["backtest_combo", "重跑回测并更新组合", "四策略全样本回测 + 组合指标重算，约 105 秒"],
               ["combo", "只重算组合指标", "按当前 core_weight 重跑各档组合回测，约 45 秒"],
-              ["test", "运行单元测试", "100 项用例，含无前视偏差与策略开关检验"],
+              ["test", "运行单元测试", ""],
             ].map(([id, t, s]) => `
               <div style="display:flex;align-items:center;gap:12px;padding:11px 0;
                           border-bottom:1px solid rgba(255,255,255,.04)">
@@ -2199,7 +1980,7 @@
       </div>
 
       <div class="mt">
-        ${tableCard("成交额最大的 30 只", "成交越活跃，买卖时越不容易冲击价格，也更适合较大资金",
+        ${tableCard("成交额最大的 30 只", "",
           [
             { key: "code", label: "代码", fmt: (v) => `<span class="mono kopen" data-kcode="${esc(v)}">${esc(v)}</span>` },
             { key: "name", label: "名称", fmt: (v) => `<span class="strong">${esc(v)}</span>` },
@@ -2432,13 +2213,6 @@
       } else if (page === "portfolio") {
         state.portfolio = await api("/api/portfolio");
         renderPortfolio();
-      } else if (page === "strategy") {
-        // 这一页要两类数据：组合口径（比例/年化/回撤/相关性）来自 overview，
-        // "已被证伪"与参数敏感性来自 research。缺任何一个都会退化成写死的旧数字，
-        // 所以两个都按需拉：直接输 #strategy 进来时 overview 还没加载过。
-        if (!state.overview) state.overview = await api("/api/overview");
-        if (!state.research) state.research = await api("/api/research");
-        renderStrategy();
       } else if (page === "research") {
         if (!state.research) state.research = await api("/api/research");
         // 顶部要引用组合口径的年化/回撤，直接输 #research 进来时 overview 还没加载
@@ -2448,6 +2222,10 @@
         state.universe = await api("/api/universe");
         try { state.mobile = await api("/api/mobile/info"); } catch (e) { state.mobile = null; }
         renderData();
+      } else {
+        // 旧书签（例如已删除的 #strategy）不该留白屏：回退到总览并改写 hash。
+        location.replace("#overview");
+        return;
       }
       guardFrozen();
     } catch (e) {

@@ -45,21 +45,22 @@ BROWSER_CANDIDATES = [
 CASES = [
     ("overview", "/#overview", 1280, 900, False),
     ("signal", "/#signal", 1280, 900, False),
-    # 资金 3 万 < 整份清单门槛 4.8 万：必须出现"买不齐 + 三条出路"的提示。
-    # 这条分支是真实用户最常卡住的地方，值得单独守一个用例。
-    ("signal-lowcash", "/?cash=30000#signal", 1280, 900, False),
+    # 低资金必须出现「买不齐 + 三条出路」。资金取 1 万而不是 3 万：
+    # 门槛随模式变（纯卫星 ≈2.4 万，核心+卫星 ≈4.8 万），3 万在纯卫星下反而买得齐，
+    # 用例会随用户切换模式而假失败。1 万在两种模式下都买不齐。
+    ("signal-lowcash", "/?cash=10000#signal", 1280, 900, False),
     ("track", "/#track", 1280, 900, False),
     ("portfolio", "/#portfolio", 1280, 900, False),
     ("myholdings", "/#myholdings", 1280, 900, False),
-    ("strategy", "/#strategy", 1280, 900, False),
     # research 页长期没进用例表：它恰恰是改动最多、硬编码数字最多的一页。
     # 12 个用例全绿时，这一页可能整块是旧数据，冒烟发现不了。
     ("research", "/#research", 1280, 900, False),
     ("data", "/#data", 1280, 900, False),
+    # 已删除的页面（旧书签）必须回退到总览，不能白屏
+    ("legacy-hash", "/#strategy", 1280, 900, False),
     ("narrow-overview", "/#overview", 430, 820, False),
     ("narrow-signal", "/#signal", 430, 820, False),
     ("narrow-track", "/#track", 430, 820, False),
-    ("narrow-strategy", "/#strategy", 430, 820, False),
     ("narrow-research", "/#research", 430, 820, False),
     ("kline", "/?kline=sh516620&theme=dark", 1180, 860, True),
     ("narrow-kline", "/?kline=sh516620&theme=dark", 430, 820, True),
@@ -167,6 +168,9 @@ def check(case, probe: dict | None, expect_kline: bool) -> list[str]:
     if bool(probe.get("kline")) != expect_kline:
         bad.append(f"{name}: K 线弹窗状态异常（期望 {expect_kline}）")
     # 低资金用例专有断言：3 万买不齐清单时必须给出可执行建议
+    # 已删页面的旧书签必须落到总览，而不是停在空白页
+    if name.startswith("legacy-hash") and probe.get("page") != "overview":
+        bad.append(f"{name}: 旧 hash 未回退到总览（当前 {probe.get('page')}）")
     if name.startswith("signal-lowcash") and not probe.get("fitNote"):
         bad.append(f"{name}: 资金不足时没有出现「买不齐」提示（lot-fit-row）")
     return bad
