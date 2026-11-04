@@ -45,6 +45,9 @@ BROWSER_CANDIDATES = [
 CASES = [
     ("overview", "/#overview", 1280, 900, False),
     ("signal", "/#signal", 1280, 900, False),
+    # 资金 3 万 < 整份清单门槛 4.8 万：必须出现"买不齐 + 三条出路"的提示。
+    # 这条分支是真实用户最常卡住的地方，值得单独守一个用例。
+    ("signal-lowcash", "/?cash=30000#signal", 1280, 900, False),
     ("track", "/#track", 1280, 900, False),
     ("portfolio", "/#portfolio", 1280, 900, False),
     ("myholdings", "/#myholdings", 1280, 900, False),
@@ -109,6 +112,10 @@ def run_browser(browser: str, url: str, w: int, h: int, *,
     cmd = [
         browser, "--headless=new", "--disable-gpu", "--hide-scrollbars",
         "--no-first-run", "--no-default-browser-check",
+        # 必须绕过系统代理：本机常开 Clash(7897)，Chrome 会把 127.0.0.1 也发给代理，
+        # 代理回连 localhost 失败 → 拿到的是 Chrome 错误页（30 万字符、<title>127.0.0.1</title>），
+        # 冒烟会现象成"页面没渲染"甚至"全部用例失败"，而服务本身完全正常。
+        "--no-proxy-server",
         f"--user-data-dir={profile}",
         f"--window-size={w},{h}",
         "--force-device-scale-factor=1",
@@ -159,6 +166,9 @@ def check(case, probe: dict | None, expect_kline: bool) -> list[str]:
         bad.append(f"{name}: 界面残留旧口径数字 {stale}（回测记账已修，这些数已失效）")
     if bool(probe.get("kline")) != expect_kline:
         bad.append(f"{name}: K 线弹窗状态异常（期望 {expect_kline}）")
+    # 低资金用例专有断言：3 万买不齐清单时必须给出可执行建议
+    if name.startswith("signal-lowcash") and not probe.get("fitNote"):
+        bad.append(f"{name}: 资金不足时没有出现「买不齐」提示（lot-fit-row）")
     return bad
 
 

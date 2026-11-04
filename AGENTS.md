@@ -9,25 +9,31 @@
 A 股 ETF 的量化轮动工具：260 只 ETF 横截面动量选 Top3（TGAR 策略）+ 趋势闸门控仓位。
 配 Web 控制台、Android APK、回测/诊断/报告/月报全套流程。
 
-**当前数字（2026-11-02）**
+**当前数字（卫星腿口径，除组合一行外）**
 
+<!-- num:begin 由 scripts/sync_readme.py 生成，勿手改 -->
 | 口径 | 值 |
 |---|---|
-| 样本内年化 | **12.4%**（回撤 −35.2%，夏普 0.53） |
-| **对外预期** | **11%~13%**（锚点 12.62%，滚动前向样本外） |
-| 95% 置信区间 | **[−2.74%, +42.20%]**（块自助法，7.25） |
-| 亏钱概率 / 跑不过买指数 | **5.0% / 16.9%** |
-| 最长水下 | 3.15 年（2021-09 → 2024-11） |
+| 样本内年化 | **12.5%**（回撤 −35.2%，夏普 0.53） |
+| **对外预期** | **9%~11%**（锚点 10.3%，滚动前向样本外） |
+| 95% 置信区间 | **[−7.29%, +38.04%]**（块自助法 20 日块 × 2000 次，7.25） |
+| 亏钱概率 / 跑不赢沪深300 | **13.2% / 31.4%**（同期基准年化 7.0%） |
+| **核心-卫星组合**（默认执行） | **12.1% / −19.4% / 卡玛 0.62**（`docs/combo.md`） |
+| 最长水下 | 3.8 年（2021-01 → 2024-11） |
+<!-- num:end -->
 
 **一句话定性**：alpha 只在**风格/板块极端分化**的行情出现；普涨行情会跑输；
-崩盘里少亏一半。不是全天候——2019-2025 七年超额仅 +2.9pp（t=0.37）。
+崩盘里少亏一半。不是全天候——超额集中在 2024 年以后
+（2019—2021 跑输基准 56pp）。
 
-## 2. 三条命令上手
+## 2. 常用命令（先跑 doctor）
 
 ```bash
 .venv/Scripts/python.exe -m etfquant doctor     # 数据截止日 + 绩效 + 口径（先看这个）
 .venv/Scripts/python.exe -m etfquant refresh    # 更新行情 → 回测 → 信号（= 界面按钮）
-.venv/Scripts/python.exe -m etfquant test       # 328 项单测
+.venv/Scripts/python.exe -m etfquant test       # 350 项单测
+python scripts/check_all.py --with-ui           # 单测 + 审计 + 界面冒烟（提交前跑这个）
+python scripts/sync_readme.py                   # 行情更新后同步文档里的数字（勿手改生成块）
 ```
 
 Windows 双击 `打开界面.bat` 起 Web 控制台（`http://127.0.0.1:8800/`）。
@@ -44,18 +50,20 @@ Windows 双击 `打开界面.bat` 起 Web 控制台（`http://127.0.0.1:8800/`�
 | `scripts/research/` | 一次性实验（23 个），产物进 `output/experiments/` | 只在做对照实验时 |
 | `output/` | **产物契约**见 `output/README.md`；顶层是 app 依赖，`experiments/` 可删 | 服务/报告 |
 | `data/` | 行情缓存、标的池、归档信号、**净值库** | 全部 |
-| `tests/` | 328 项单测 | 自检 |
+| `tests/` | 350 项单测 | 自检 |
 | `docs/` | 完整档案、架构、尽调清单、自查、一页总结 | 人 + Agent |
 
 ## 4. 硬约束（改代码前必读）
 
 1. **落盘必须原子写**：`etfquant/io_utils.atomic_to_csv / atomic_write_text`。直接 `to_csv` 会留半文件。
 2. **信号必须确定性**：任何"排名取前 N"都要显式 tie-break（分数降序 → 同分按原始 R20 降序）。
-3. **口径只有一个来源**：对外一律 **11%~13%**，12.4% 只能称"样本内"。换算在 `etfquant/expectation.py`，
-   数据在 `output/overfit_summary.json`。**禁止在任何地方手写这两个数字。**
+3. **口径只有一个来源**：对外一律 **9%~11%**，12.4% 只能称"样本内"。换算在 `etfquant/expectation.py`，
+   数据在 `output/overfit_summary.json`；自助法区间在 `output/experiments/bootstrap_ci.csv`。
+   **禁止在任何地方手写这两个数字**——界面从 `/api/overview` 与 `/api/research.brief` 读，
+   文档由 `sync_readme.py` 与 audit 守护。
 4. **结构类信号必须在线计算**（`etfquant/chan.py::online_states`）。全样本端点回放会虚增约 8 倍 CAGR。
 5. **改动后必跑**：`test`（328）+ `audit`（32）；改了 `strategy.py` 还要 `verify-engine`（手机端对拍，现为 20 个时点 + 因子抽查）；
-   改了 `web/` 跑 `python scripts/ui_smoke.py`（12 个用例，查 JS 报错/横向溢出/空渲染/NaN）。
+   改了 `web/` 跑 `python scripts/ui_smoke.py`（16 个用例，查 JS 报错/渲染失败/溢出/空渲染/NaN/旧口径短语/低资金提示）。
    全量自检：`python scripts/check_all.py [--with-ui]`（单测 + 审计 + 可选冒烟，任一失败即中断）。
 6. **不要在这个仓库里调参**：7.5 的 PBO 43.2% 已判定样本内搜索期望收益为负。只能靠前向。
 7. **依赖方向单向**：生产模块不得 import 研究模块；`etfquant` 不得 import `server`。
@@ -119,17 +127,49 @@ Windows 双击 `打开界面.bat` 起 Web 控制台（`http://127.0.0.1:8800/`�
 
 **规则已写进 `docs/strategy_dd.md` 闸门 6。**
 
-## 8. 当前状态（判断上下文是否过期）
+## 9. 2026-11-03 的四条新教训（数字派生类事故）
+
+这一天修回测记账（持 stock 过夜跳空漏乘净值，年化 17%→12.4%）时，暴露出
+"结论数字散落各处、与数据脱钩"的完整链条。以下规则已用代码固化，违反会被
+audit / CI / UI 冒烟拦下：
+
+1. **界面结论数字必须现算**：凡是"X% vs Y%"式的对照结论，从实验表
+   （`ladder.csv` / `ablation.csv` / `subsample2.csv`）按行名关键字取值算 delta
+   （`server._research_brief`），**不许写死在 HTML 里**。写死的数字在回测口径
+   变更后不会报错，只会让同一屏幕出现两套矛盾数据。
+2. **实验表截止日不许写死**：`grid2.py` / `ablation.py` 用
+   `pipeline.latest_data_date()` 从缓存反推（取众数防单只停牌带偏）。
+   写死日期曾让实验表比主回测早两周、口径分叉。
+3. **冻结类 hash 必须行尾归一化**：git 会转换文本 EOL，逐字节 sha256/md5 在
+   CI（检出 LF）上对本机（CRLF）产物是假阳性。APK 内嵌 data.js、预注册
+   `*.sha256` 校验一律 `bytes.replace(b"\r\n", b"\n")` 后再 hash。
+4. **模拟环境缺失用 mock，禁止 mv 真实目录**：`data/cache` 曾被
+   `mv`/`mv` 回来层层嵌套，305 个行情文件埋到三层深处。用
+   `unittest.mock.patch("audit.load_panel", ...)`。
+5. **新页面必须进 `scripts/ui_smoke.py` 用例表**：research 页漏登记过，
+   12 用例全绿时它整块是旧数据。探针现查四类问题：JS 报错、渲染失败
+   （"加载失败：…"被 loadPage 吞进正文）、NaN/undefined、**旧口径短语**
+   （整句匹配，裸数字会误中真实行情值）。
+6. **无头浏览器必须绕系统代理**：本机常开 Clash(7897)，Chrome 会把 127.0.0.1
+   也发给代理，回连失败后拿到的是 Chrome 错误页（30 万字符、
+   `<title>127.0.0.1</title>`、`ERR_CONNECTION_REFUSED`），冒烟会误报成
+   "页面没渲染"。`run_browser` 已加 `--no-proxy-server`；用 curl 探测端口时
+   记得 `--noproxy '*'`（否则同样 502）。
+7. **数字表不要手写**：`README` 的 exp / combo 块、`AGENTS.md` 与
+   `docs/summary_cn.md` 的 num 块都由 `sync_readme.py` 生成。数据更新后
+   先跑 sync 再提交，否则 audit 的 J 节会逐格对不上。
+
+## 10. 当前状态（判断上下文是否过期）
 
 - 数据截止：`python -m etfquant doctor`；
 - 归档：20 期（1 期真实 live + 19 期回填），纸上净值与同期回测偏差 0.00pp；
 - **试验登记 73 次**（`data/trials.json`），DSR 保守口径 7.5%；
-- **328 项单测、32 项审计**全过；
+- **350 项单测、33 项审计、UI 冒烟 15 用例**全过；
 - **实验记录 7.1–7.27**，全部结论见 `docs/README_full.md` 第七章。近期关键：
   - 7.23 执行三约束：开盘成交→17.0%，**收盘成交→3.9%**；容量 100–500 万；0.30%/边失效
   - 7.24 信号衰减：IC 0.017–0.022，**20 日归零、40 日转负**
-  - 7.25 置信区间：[−2.74%, +42.20%]，P(亏钱)=5.0%
+  - 7.25 置信区间：[−7.29%, +38.04%]，P(亏钱)=13.2%（2026-11-03 随记账修复重算）
   - 7.26 HMM 概率化 regime：否，样本外预测方向反了
   - 7.27 扩样本到 2013：**2015 股灾 −29.4% vs 基准 −52.6%**，闸门有效；
     但 2019-2025 仍无 alpha → alpha 依赖"分化行情"
-- APK v1.5.0（`dist/` 里的二进制是旧前端，按用户要求不自动打包）
+- APK v1.5.13 / code 29，exe 同日重打（`dist/` 与源码同步）

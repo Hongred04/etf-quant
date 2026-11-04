@@ -928,8 +928,24 @@
     `;
 
     const input = $("#cashInput");
+    // 资金优先级：URL 参数 > 上次输入 > 默认 10 万。
+    // `/?cash=30000#signal` 便于把"按 3 万算给我看"直接分享出去，
+    // 也让无头浏览器能复现「资金不足」这条分支做回归验证。
     const saved = localStorage.getItem("etfquant-cash");
-    if (saved) input.value = saved;
+    const qCash = parseInt(new URLSearchParams(location.search).get("cash") || "", 10);
+    if (Number.isFinite(qCash) && qCash > 0) input.value = String(qCash);
+    else if (saved) input.value = saved;
+
+    /* 清单按"操作频率"分组：核心腿买完基本不动，卫星每期可能换，防守债券
+       只在闸门降档时出现。原来的表按占比混排，8 行里哪几行要动手要看徽章猜。 */
+    const legOf = (r) => (r.leg === "core" ? "core" : r.category === "债券" ? "bond" : "sat");
+    const GROUPS = [
+      { key: "core", title: "核心腿 · 打底，不用常动", sub: "每期只做等权重置，偏离很小" },
+      { key: "sat", title: "卫星腿 · 每期可能换", sub: "动量信号说了算，是真正要盯的几行" },
+      { key: "bond", title: "防守债券", sub: "大盘走弱时卫星腿的另一半资金" },
+    ];
+    const GROUP_OF = Object.fromEntries(GROUPS.map((g) => [g.key, g]));
+    const orderedRows = GROUPS.flatMap((g) => rows.filter((r) => legOf(r) === g.key));
 
     function paint() {
       const raw = input.value.replace(/[^\d]/g, "");
@@ -939,7 +955,9 @@
 
       let total = 0;
       let gapSum = 0;
-      const body = rows.map((r, i) => {
+      let idx = 0;
+      let lastGroup = null;
+      const body = orderedRows.map((r) => {
         const w = r.share / tw;
         const target = cash * w;
         const lotCost = r.price * 100;
@@ -958,8 +976,15 @@
           : gapBad
             ? `<span class="lot-gap">缺 ¥${Math.round(gap).toLocaleString("zh-CN")}</span>`
             : "";
-        return `<tr${short ? ' class="row-warn"' : ""}>
-          <td class="dim">${i + 1}</td>
+        // 组头：换了组就插一行说明，让"哪几行不用动"在表格里一眼可辨
+        const g = GROUP_OF[legOf(r)];
+        const head = g !== lastGroup
+          ? `<tr class="group-head"><td colspan="8"><b>${esc(g.title)}</b><span class="dim"> · ${esc(g.sub)}</span></td></tr>`
+          : "";
+        lastGroup = g;
+        idx += 1;
+        return `${head}<tr${short ? ' class="row-warn"' : ""}>
+          <td class="dim">${idx}</td>
           <td style="text-align:left">
             <span class="strong kopen" data-kcode="${esc(r.code)}">${esc(r.name)}</span>
             ${r.leg === "core" ? '<span class="leg-tag" title="核心腿：每期等权重置，不随信号换出">核心</span>' : ""}
@@ -994,9 +1019,26 @@
           再往上应先替换薄量债券 ETF 并重新回测，否则回测容量假设不成立。</td></tr>`;
       }
       if (cash > 0 && cash < minCash) {
-        $("#orderFoot").innerHTML += `<tr><td colspan="8" style="text-align:left;font-weight:400">
-          <span class="up"><b>至少需要 ${fmtMoney(minCash)}</b> 才能每只买满 1 手；当前资金有标的买不进，
-          实际持仓会与信号不一致。</span></td></tr>`;
+        // 指出卡住的那一行（通常是一手 1.2 万的债券 ETF），并给可执行的三条路，
+        // 而不是只扔一个"至少需要 X"——用户看到 4.8 万门槛时最需要的是选项。
+        const blocker = rows.reduce((a, b) =>
+          (b.lot_cost / (b.share / tw || 1)) > (a.lot_cost / (a.share / tw || 1)) ? b : a);
+        const satOnly = rows
+          .filter((r) => legOf(r) !== "core")
+          .map((r) => r.lot_cost / (r.share / tw || 1));
+        const satMin = satOnly.length ? Math.max(...satOnly) : minCash;
+        $("#orderFoot").innerHTML += `<tr><td colspan="8" class="lot-fit-row">
+          <b>当前资金买不齐整份清单</b>：卡在「${esc(blocker.name)}」——
+          一手就要 ${fmtMoney(blocker.lot_cost)}，而它的预算只有
+          ${fmtMoney(cash * (blocker.share / tw))}。每只买满 1 手至少需要
+          <b>${fmtMoney(minCash)}</b>。三条路任选：<br>
+          ① 资金加到 ${fmtMoney(minCash)} 以上，按本清单正常执行；<br>
+          ② 切到纯卫星模式（<code>python scripts/run_signal.py --core-weight 0</code>），
+          清单只剩 ${rows.length - rows.filter((r) => r.leg === "core").length} 只、
+          门槛约 ${fmtMoney(satMin)}——代价是回到回撤 −35% 的形态；<br>
+          ③ 保持清单但接受缺口：买不进的预算留在现金，
+          实际敞口比回测假设更保守，收益与回撤都会偏离口径。
+        </td></tr>`;
       } else if (cash > 0 && left > 0.5) {
         const gapPct = (left / cash) * 100;
         $("#orderFoot").innerHTML += `<tr><td colspan="8" class="lot-gap-row">
@@ -3189,6 +3231,8 @@
           failed: failed ? text.trim().slice(0, 160) : "",
           badText: /NaN|undefined|Infinity/.test(text),
           stale: hits,
+          // 清单页的"资金买不齐"分支：低资金用例靠这个断言，见 scripts/ui_smoke.py
+          fitNote: !!document.querySelector(".lot-fit-row"),
           kline: !!(modal && !modal.hidden),
           errs: (window.__errs || []).slice(0, 6),
         });

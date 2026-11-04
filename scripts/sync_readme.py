@@ -333,6 +333,148 @@ def main() -> None:
         else:
             print("[--] 根 README 口径块无变化")
 
+    # ---------- 根 README 的核心-卫星对照表 ----------
+    # 这张表原来是手写的：combo.json 每天随行情刷新（区间末端推进一天，
+    # 年化就可能从 12.8% 变 12.9%），手写表必然隔天就假。
+    # audit 的 J 节会逐格核对，这里保证「跑一次 sync 就自动对齐」。
+    combo_fp = ROOT / "output" / "combo.json"
+    if README_HOME.exists() and combo_fp.exists():
+        try:
+            cdoc = json.loads(combo_fp.read_text(encoding="utf-8"))
+            cfgs = {round(float(r.get("core_weight", -1)), 2): r
+                    for r in (cdoc.get("configs") or [])}
+            cw = 0.5
+            try:
+                mdoc = json.loads((ROOT / "output" / "signal_meta.json").read_text(encoding="utf-8"))
+                cw = round(float(mdoc.get("core_weight") or cw), 2)
+            except (OSError, ValueError):
+                pass
+            sat, mix = cfgs.get(0.0), cfgs.get(cw)
+            if sat and mix:
+                d_cagr = (mix["cagr"] - sat["cagr"]) * 100
+                d_mdd = abs(sat["mdd"] - mix["mdd"]) * 100
+                # "降敞口到同样回撤只有 X%"：取 dd_frontier 里敞口 0.50 那一档
+                delev_txt = ""
+                dfp = ROOT / "output" / "dd_frontier.json"
+                if dfp.exists():
+                    try:
+                        scean = json.loads(dfp.read_text(encoding="utf-8")).get("scenarios") or []
+                        hit = [x for x in scean if "0.50" in str(x.get("name", ""))]
+                        if hit:
+                            delev_txt = (f"——降敞口到同样回撤只有 "
+                                         f"{hit[0]['cagr'] * 100:.1f}% 年化。")
+                    except (OSError, ValueError):
+                        pass
+                body = (
+                    "<!-- combo:begin 由 scripts/sync_readme.py 从 output/combo.json 生成，勿手改 -->\n"
+                    "> | | 年化 | 最大回撤 | Calmar |\n"
+                    "> |---|---|---|---|\n"
+                    f"> | 纯 TGAR（旧默认） | {sat['cagr']*100:.1f}% | "
+                    f"−{abs(sat['mdd'])*100:.1f}% | {sat['calmar']:.2f} |\n"
+                    f"> | **核心 {cw*100:.0f}% + 卫星 {(1-cw)*100:.0f}%（新默认）** | "
+                    f"**{mix['cagr']*100:.1f}%** | **−{abs(mix['mdd'])*100:.1f}%** | "
+                    f"**{mix['calmar']:.2f}** |\n"
+                    ">\n"
+                    f"> 收益少 {abs(d_cagr):.1f}pp，回撤少 {d_mdd:.1f}pp。"
+                    f"这不是\"降敞口\"{delev_txt}\n"
+                    "<!-- combo:end -->")
+                h = README_HOME.read_text(encoding="utf-8")
+                h2 = re.sub(r"<!-- combo:begin.*?<!-- combo:end -->", body, h, count=1, flags=re.S)
+                if h2 != h:
+                    README_HOME.write_text(h2, encoding="utf-8")
+                    print("[OK] 根 README 核心-卫星表已更新")
+                else:
+                    print("[--] 根 README 核心-卫星表无变化")
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            print(f"[WARN] 核心-卫星表未生成：{exc}")
+
+    # ---------- 数字表：AGENTS.md 与 docs/summary_cn.md ----------
+    # 样本内年化、对外预期、自助法区间、组合指标全都随行情漂移（区间末端推进一天，
+    # 年化就可能变 0.05pp）。三份文档各手写一遍，等于每天手改三处。
+    # 这里统一生成，两个文件各有一处 <!-- num:begin --> 块。
+    num_docs = [ROOT / "AGENTS.md", ROOT / "docs" / "summary_cn.md"]
+    if all(p.exists() for p in num_docs):
+        try:
+            ci_fp = OUT / "experiments" / "bootstrap_ci.csv"
+            ci_row = None
+            if ci_fp.exists():
+                _ci = pd.read_csv(ci_fp)
+                _hit = _ci[_ci["指标"] == "CAGR"]
+                if len(_hit):
+                    ci_row = _hit.iloc[0]
+            lo = float(ci_row["P2.5"]) * 100 if ci_row is not None else None
+            hi = float(ci_row["P97.5"]) * 100 if ci_row is not None else None
+            p_loss = float(ci_row["P(CAGR<0)"]) * 100 if ci_row is not None else None
+            p_bench = float(ci_row["P(CAGR<基准)"]) * 100 if ci_row is not None else None
+            ci_worst = None
+            if ci_row is not None:
+                _mdd = _ci[_ci["指标"] == "最大回撤"]
+                if len(_mdd):
+                    ci_worst = abs(float(_mdd.iloc[0]["P2.5"])) * 100
+
+            cagr = float(tg["年化收益(CAGR)"]) * 100
+            mdd = float(tg["最大回撤"]) * 100
+            sharpe = float(tg["夏普比率"])
+            uw = metrics.underwater_stats(self_nav) or {}
+            uw_txt = ""
+            if uw.get("max_days"):
+                uw_txt = (f"{uw['max_days'] / 365.25:.1f} 年"
+                          f"（{str(uw.get('max_start'))[:7]} → {str(uw.get('max_end'))[:7]}）")
+
+            cw_txt = ""
+            mix_txt = ""
+            cfp = OUT / "combo.json"
+            if cfp.exists():
+                _c = json.loads(cfp.read_text(encoding="utf-8"))
+                _cfgs = {round(float(r.get("core_weight", -1)), 2): r for r in (_c.get("configs") or [])}
+                _cw = 0.5
+                _sat, _mix = _cfgs.get(0.0), _cfgs.get(_cw)
+                if _sat and _mix:
+                    mix_txt = (f"**{_mix['cagr'] * 100:.1f}% / −{abs(_mix['mdd']) * 100:.1f}%"
+                               f" / 卡玛 {_mix['calmar']:.2f}**")
+
+            bench_txt = f"同期基准年化 {b_cagr * 100:.1f}%"
+            # 负号统一用 U+2212「−」，与文档其余部分一致（ASCII "-" 在正文里看着像连字符）
+            ci_txt = (f"**[−{abs(lo):.2f}%, +{hi:.2f}%]**" if lo is not None else "—")
+
+            agents_body = (
+                "<!-- num:begin 由 scripts/sync_readme.py 生成，勿手改 -->\n"
+                "| 口径 | 值 |\n|---|---|\n"
+                f"| 样本内年化 | **{cagr:.1f}%**（回撤 −{abs(mdd):.1f}%，夏普 {sharpe:.2f}） |\n"
+                f"| **对外预期** | **{exp['label']}**（锚点 {exp['anchor'] * 100:.1f}%，滚动前向样本外） |\n"
+                f"| 95% 置信区间 | {ci_txt}（块自助法 20 日块 × 2000 次，7.25） |\n"
+                f"| 亏钱概率 / 跑不赢沪深300 | "
+                f"**{p_loss:.1f}% / {p_bench:.1f}%**（{bench_txt}） |\n"
+                f"| **核心-卫星组合**（默认执行） | {mix_txt or '—'}（`docs/combo.md`） |\n"
+                f"| 最长水下 | {uw_txt or '—'} |\n"
+                "<!-- num:end -->")
+
+            summary_body = (
+                "<!-- num:begin 由 scripts/sync_readme.py 生成，勿手改 -->\n"
+                "\n| 数字 | 值 | 含义 |\n|---|---|---|\n"
+                f"| 样本内回测 | **{cagr:.1f}%/年**（回撤 −{abs(mdd):.1f}%） | 参数在同一段历史上挑过，是上限 |\n"
+                f"| 对外口径 | **{exp['label']}** | 扣掉\"挑参数\"后的中枢，可对外引用 |\n"
+                f"| 95% 置信区间 | {ci_txt} | 换一段历史可能落在哪 |\n"
+                "\n**两个概率必须知道**：\n\n"
+                f"- **亏钱的概率 {p_loss:.1f}%**\n"
+                f"- **跑不赢\"直接买沪深300\"（{bench_txt}）的概率 {p_bench:.1f}%**\n"
+                "\n风险侧：最大回撤 "
+                f"−{abs(mdd):.1f}%（样本内）"
+                + (f"，自助法下最坏可到 **−{ci_worst:.1f}%**；\n" if ci_worst is not None else "；\n")
+                + f"最长水下期 {uw_txt or '—'}。\n"
+                "<!-- num:end -->")
+
+            for doc, body in zip(num_docs, [agents_body, summary_body]):
+                txt = doc.read_text(encoding="utf-8")
+                new = re.sub(r"<!-- num:begin.*?<!-- num:end -->", body, txt, count=1, flags=re.S)
+                if new != txt:
+                    doc.write_text(new, encoding="utf-8")
+                    print(f"[OK] {doc.relative_to(ROOT)} 数字表已更新")
+                else:
+                    print(f"[--] {doc.relative_to(ROOT)} 数字表无变化")
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            print(f"[WARN] 数字表未生成：{exc}")
+
     print(f"     TGAR  CAGR {tg['年化收益(CAGR)']*100:.2f}%  回撤 {tg['最大回撤']*100:.2f}%  "
           f"夏普 {tg['夏普比率']:.3f}  卡玛 {tg['卡玛比率']:.3f}")
     print(f"     基准  CAGR {b_cagr*100:.2f}%  回撤 {b_mdd*100:.2f}%  夏普 {b_sharpe:.3f}")

@@ -405,6 +405,28 @@ def main() -> None:
        "缺 frozen_at：跑一次 python -m etfquant deep 补齐",
        f"frozen_at={meta.get('frozen_at')}（重跑 deep 需 --force）")
 
+    # 活文档里的旧口径数字。2026-11-03 修复回测记账后对外预期从 11%~13% 变为
+    # 9%~11%，但 docs/README_full、summary_cn、AGENTS.md 里还残留着五个旧值——
+    # 入口文档先撒谎是最贵的坑。README_full 是历史档案不动正文，只在 6.2 加批注；
+    # 三份"活文档"出现旧串即 FAIL。
+    stale_doc_hits: list[str] = []
+    for doc, marker in [
+        ("README.md", "活文档"),
+        ("AGENTS.md", "活文档"),
+        ("docs/summary_cn.md", "活文档"),
+    ]:
+        fp2 = ROOT / doc
+        if not fp2.exists():
+            continue
+        txt2 = fp2.read_text(encoding="utf-8")
+        for needle in ("11%~13%", "[−2.74%, +42.20%]", "亏钱概率 5.0%", "锚点 12.62%",
+                       "16.99%/年", "亏钱的概率 5.0%"):
+            if needle in txt2:
+                stale_doc_hits.append(f"{doc} 含旧口径「{needle}」")
+    ok("活文档无旧口径残留（11%~13% 时代已终结）", not stale_doc_hits,
+       "；".join(stale_doc_hits[:4]) + "（改文档，数字以 output/overfit_summary.json 与 bootstrap_ci.csv 为准）",
+       "README / AGENTS / summary_cn 三份已核对")
+
     readme_fp = ROOT / "docs" / "README_full.md"
     if diag and readme_fp.exists():
         from etfquant.diagnostics import snapshot_rows  # noqa: PLC0415
