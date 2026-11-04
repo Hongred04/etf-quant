@@ -26,6 +26,7 @@ ENDPOINTS = [
     "api_signal",
     "api_holdings",
     "api_portfolio",
+    "api_today",
     "api_universe",
     "api_debug_paths",
     "api_research",

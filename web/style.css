@@ -254,6 +254,29 @@ html, body {
   padding-bottom: 2px;
 }
 
+/* 今日盈亏：状态条里的一个数据块，不是按钮，不加背景 */
+.ss-today {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-left: auto;
+  margin-right: 4px;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ss-today em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--txt-3);
+}
+.ss-today .up, .ss-today .down { font-weight: 640; }
+.foot-today { margin-left: 14px; font-size: 12px; }
+@media (max-width: 760px) {
+  .ss-today { margin-left: 0; font-size: 12px; }
+  .ss-today em { display: none; }
+}
+
 /* 模式开关：一个分段控件，两个状态
    视觉上必须"一眼看出当前是哪个"，所以选中态用实心而不是描边。 */
 .mode-switch {

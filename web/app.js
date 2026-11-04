@@ -456,6 +456,50 @@
   }
 
   /* ------------------------------------------------------- 页面：概览 */
+  /* 今日盈亏：按当前清单权重 + 实时价。资金取用户在清单页填过的数（同一 key），
+     没填就只显示百分比——不要替用户假设一个本金。 */
+  function cashAmount() {
+    // 与清单页同一优先级：URL 参数 > 上次输入。否则分享出去的 /?cash= 链接
+    // 在总览页只显示百分比、不显示金额，看着像功能坏了。
+    const q = parseInt(new URLSearchParams(location.search).get("cash") || "", 10);
+    if (Number.isFinite(q) && q > 0) return q;
+    const n = parseInt(localStorage.getItem("etfquant-cash") || "0", 10);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
+
+  /* 清单页合计行里的今日盈亏：按用户刚输入的这笔资金的金额口径 */
+  function todayFootHTML() {
+    const t = state.today;
+    if (!t || t.error || t.pct == null) return "";
+    const amt = todayAmount(t);
+    if (!amt) return "";
+    const up = amt.value >= 0;
+    return `<span class="${up ? "up" : "down"}">今日 ${up ? "+" : "−"}${fmtMoney(Math.abs(amt.value))}</span>`;
+  }
+
+  /* 今日盈亏的金额：有真实持仓时用后端算好的账户金额（元）；
+     没有持仓记录时按用户填的资金 × 当日涨幅折算，并标明是估算。 */
+  function todayAmount(t) {
+    if (t.amount != null) return { value: t.amount, estimated: false };
+    const money = cashAmount();
+    if (!money) return null;
+    return { value: money * t.pct / 100, estimated: true };
+  }
+
+  function todayHTML() {
+    const t = state.today;
+    if (!t || t.error || t.pct == null) return "";
+    const up = t.pct >= 0;
+    const amt = todayAmount(t);
+    const amtHTML = amt
+      ? `<em title="${amt.estimated ? "按你填的资金估算" : "按已录入的持仓计算"}">`
+        + `${amt.value >= 0 ? "+" : "−"}${fmtMoney(Math.abs(amt.value))}${amt.estimated ? "≈" : ""}</em>`
+      : "";
+    const tail = t.closed ? "收盘" : "盘中";
+    return `<span class="${up ? "up" : "down"}">今日 ${up ? "+" : "−"}${Math.abs(t.pct).toFixed(2)}%</span>${amtHTML}`
+      + `<em class="dim">${esc(t.as_of || "")} ${tail}</em>`;
+  }
+
   function renderOverview() {
     const d = state.overview;
     if (!d || d.error) {
@@ -502,6 +546,7 @@
         <span class="ss-pos">${coreShare > 0.01
           ? `底仓 ${pct(coreShare, 0)} · 进攻 ${pct(1 - coreShare, 0)}（其中债券 ${pct(bondShare, 0)}）`
           : `权益 ${pct(1 - bondShare, 0)} · 债券 ${pct(bondShare, 0)}`}</span>
+        <span id="todayChip" class="ss-today">${todayHTML()}</span>
         <a class="ss-link" href="#signal">查看清单 →</a>
       </div>`;
     }
@@ -953,7 +998,8 @@
       const usedPct = cash ? (total / cash) * 100 : 0;
       $("#orderBody").innerHTML = body;
       $("#orderFoot").innerHTML = `<tr>
-        <td colspan="3" style="text-align:left">合计投入 <span class="dim">· 已用 ${usedPct.toFixed(1)}%</span></td>
+        <td colspan="3" style="text-align:left">合计投入 <span class="dim">· 已用 ${usedPct.toFixed(1)}%</span>
+          <span id="todayFootCell" class="foot-today">${todayFootHTML()}</span></td>
         <td colspan="3" style="text-align:right" class="strong">${fmtMoney(total)}</td>
         <td colspan="2" class="strong">剩余 ${fmtMoney(left)}</td>
       </tr>`;
@@ -2200,9 +2246,11 @@
     try {
       if (page === "overview") {
         if (!state.overview) state.overview = await api("/api/overview");
+        if (!state.today) state.today = await api("/api/today").catch(() => null);
         renderOverview();
       } else if (page === "signal") {
         state.signal = await api("/api/signal");
+        state.today = await api("/api/today").catch(() => null);
         renderSignal();
       } else if (page === "track") {
         state.track = await api("/api/track");
@@ -2249,6 +2297,25 @@
       view.prepend(div);
     }
   }
+
+  /* 盘中每分钟刷一次今日盈亏。只改那两个小元素，不整页重绘——
+     重绘会打断用户正在输入的资金数字，也会让图表重新动画。 */
+  async function refreshToday() {
+    if (document.hidden || state.task) return;
+    let t = null;
+    try {
+      t = await api("/api/today");
+    } catch (e) {
+      return;                       // 断网/接口变动：保留上一次的值，不要清空
+    }
+    if (!t || t.error) return;
+    state.today = t;
+    const chip = document.getElementById("todayChip");
+    if (chip) chip.innerHTML = todayHTML();
+    const foot = document.getElementById("todayFootCell");
+    if (foot) foot.innerHTML = todayFootHTML();
+  }
+  setInterval(refreshToday, 60000);
 
   async function refreshAll() {
     state.overview = null;

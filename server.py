@@ -1636,6 +1636,106 @@ def api_universe() -> dict:
     return {"categories": cats, "top": rows, "total": int(len(pool)), "cache": n_cache, "latest": latest}
 
 
+def _market_is_closed() -> bool:
+    """是否已收盘（含非交易日）。接口只用来选文案，取不到就按已收盘处理。"""
+    try:
+        from etfquant.datafeed import is_market_closed as _imc
+        return bool(_imc())
+    except Exception:  # noqa: BLE001 —— 时间/时区异常不该让接口挂掉
+        return True
+
+
+def api_today() -> dict:
+    """今日盈亏：按当前清单的权重，用实时价算"今天赚了多少"。
+
+    为什么单开一个接口
+    ------------------
+    总览的净值曲线与「当前回撤」都来自 qfq 日线，只到上一个收盘日；盘中没有
+    任何数字会动，用户以为程序卡住了。这里用腾讯实时快照（20 秒缓存）算当日
+    加权涨跌，收盘后自动变成当日收盘，非交易日则停在最近一个交易日。
+
+    口径说明：权重取**当前清单的目标权重**，不是用户真实持仓。
+    两者在手数取整、部分成交、跨期未换仓时会不同——所以只给百分比，
+    金额由前端按用户输入的资金折算，避免后端编造一个"你的账户"。
+    """
+    # 有真实持仓就先用真实持仓：那是用户账户里真金白银的当日盈亏，
+    # 比"按清单权重估算"准确（还带着手数取整、部分成交的偏差）。
+    try:
+        hold = api_holdings()
+    except Exception:  # noqa: BLE001 —— 持仓文件损坏不该让今日盈亏整个消失
+        hold = {}
+    if (hold.get("items") or []) and hold.get("day_pnl") is not None:
+        return {
+            "source": "holdings",
+            "as_of": str(hold.get("updated_at") or "")[:10],
+            "live": True,
+            "closed": _market_is_closed(),
+            "pct": round(float(hold.get("day_pnl_pct") or 0.0) * 100, 3),
+            "amount": round(float(hold["day_pnl"]), 2),
+            "covered": 1.0,
+            "partial": bool(hold.get("missing_quotes")),
+            "items": [{
+                "code": str(r.get("code")),
+                "name": str(r.get("name")),
+                "share": float(r.get("weight") or 0.0),
+                "pct": r.get("day_pct"),
+                "contrib": None,
+                "missing": False,
+            } for r in hold["items"]],
+        }
+
+    sig = api_signal()
+    rows = sig.get("rows") or []
+    if not rows:
+        return {"error": sig.get("error") or "没有可用的清单"}
+
+    codes = [str(r["code"]) for r in rows]
+    quotes = _live_quotes(codes)
+
+    items: list[dict] = []
+    total = 0.0        # 加权当日涨跌
+    covered = 0.0      # 拿到实时价的权重和
+    quote_dates: list[str] = []
+    live_any = False
+
+    for r in rows:
+        w = float(r.get("share") or 0.0)
+        q = quotes.get(str(r["code"])) or {}
+        px, prev = q.get("price"), q.get("prev")
+        pct = (px / prev - 1.0) if (px and prev and prev > 0) else None
+        contrib = w * pct if pct is not None else 0.0
+        if pct is not None:
+            covered += w
+            total += contrib
+            if q.get("date"):
+                quote_dates.append(str(q["date"]))
+            live_any = live_any or bool(q.get("live"))
+        items.append({
+            "code": str(r["code"]),
+            "name": str(r["name"]),
+            "share": round(w, 6),
+            "price": px,
+            "prev": prev,
+            "pct": None if pct is None else round(pct * 100, 3),
+            "contrib": round(contrib * 100, 3),
+            "missing": pct is None,
+        })
+
+    # 权重没有全部覆盖时（停牌、新上市无昨收），把未覆盖部分视为 0 涨跌，
+    # 但必须告诉前端覆盖率，否则会让人以为"今天几乎没动"。
+    return {
+        "source": "signal",
+        "amount": None,
+        "as_of": max(quote_dates) if quote_dates else "",
+        "live": live_any,
+        "pct": round(total * 100, 3),
+        "covered": round(covered, 4),
+        "partial": covered < 0.999,
+        "closed": _market_is_closed(),
+        "items": items,
+    }
+
+
 def api_portfolio() -> dict:
     """
     持仓与调仓分析。
@@ -2089,6 +2189,9 @@ class Handler(BaseHTTPRequestHandler):
                                           lambda: api_kline(code, n)))
             if path == "/api/portfolio":
                 return self._json(_cached("portfolio", 120, api_portfolio))
+            if path == "/api/today":
+                # 15 秒缓存：前端每分钟刷新一次，缓存只用来挡住并发重复抓
+                return self._json(_cached("today", 15, api_today))
             if path == "/api/holdings":
                 # 不缓存：写完立刻要看到结果，且读一次只有 1 个 json + 261 行快照
                 return self._json(api_holdings())
